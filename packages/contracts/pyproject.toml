@@ -1,0 +1,16 @@
+[project]
+name = "req-contracts"
+version = "1.0.0"
+description = "Shared data contracts for ReqCheck (report, criteria, progress events, LLM config)"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.9,<3"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["req_contracts"]

@@ -1,0 +1,804 @@
+{
+  "schema_version": "1.0",
+  "passport": {
+    "document_name": "requirements.md",
+    "document_sha256": "e7dae55e5453a250d93e335f5ff9c7f775f4457ccddd333f4a67e47b20d74381",
+    "run_at": "2026-11-27T12:00:00Z",
+    "provider": "fixture",
+    "model": "hand-written-sample",
+    "agent_version": "fixture",
+    "standards": [
+      "ISO/IEC/IEEE 29148:2018 п. 5.2.5, 5.2.6",
+      "IEEE Std 830-1998 п. 4.3"
+    ]
+  },
+  "document": {
+    "name": "requirements.md",
+    "format": "md",
+    "sha256": "e7dae55e5453a250d93e335f5ff9c7f775f4457ccddd333f4a67e47b20d74381",
+    "text": "# Уведомление о расходах по карте\n\nКомплект из двух исходных документов. Текст требований не вычитывался и не исправлялся.  \nЧасть B — дочерняя спецификация, на которую ссылается раздел интеграции в части A.\n\n---\n\n## Часть A. Новый функционал\n\n### Общие сведения\n\n| Поле | Значение |\n| :--- | :--- |\n| **Наименование задачи** | Месячный порог расходов по карте |\n| **Продукт** | Мобильный банк, учебный кейс |\n| **Бизнес-процесс** | Информирование держателя карты |\n| **Business owner / Product owner / Аналитик** | Учебные роли розничного бизнеса, владельца мобильного банка и аналитика команды |\n| **Тип работы** | Новый функционал |\n| **Влияние на ИС** | Мобильный банк, карточный процессинг, сервис уведомлений |\n| **Задача в JIRA** | Практикум без Jira-задачи |\n\n### Цели\nДать клиенту возможность узнать о достижении личного бюджета в момент покупки.\n\n### Архитектура решения\nМобильное приложение → сервис настроек. Карточный процессинг → учёт расходов → сервис push.\n\n### Дизайн процесса UI\nКарты → Расходы → Уведомления. На экране видны переключатель, поле «Порог, ₸», сумма за месяц и кнопка «Сохранить». При ошибке ввода сообщение появляется под полем.\n\n### Требования к изменениям\n\n#### BPMN схема процесса\nПроведение покупки → пересчёт расходов → проверка порога → при достижении отправка push → завершение.\n\n#### Функциональные требования\n* **Ф-1.** Держатель активной карты KZT задаёт целый порог от 1 000 до 1 000 000 ₸ включительно. По умолчанию уведомление выключено.\n* **Ф-2.** Месяц определяется по дате совершения покупки в Алматы. В расходы входят проведённые покупки. Возврат уменьшает расходы месяца исходной покупки. Переводы и снятие наличных исключаются.\n* **Ф-3.** Когда расходы переходят от суммы ниже порога к сумме, равной порогу или выше, клиент получает push. На карту приходится максимум один такой push за календарный месяц.\n* **Ф-4.** При изменении порога накопленная сумма сохраняется. Если она ниже нового порога, следующее достижение вызывает push независимо от истории предыдущей настройки.\n\n### Sequence Diagram\nПроцессинг → сервис расходов: проведена покупка. Сервис расходов → настройки: получить порог карты. Сервис расходов → push: передать последние четыре цифры карты и сумму при достижении порога.\n\n### Нефункциональные требования\nСервис передаёт push на отправку в течение минуты после получения события.\n\n### Требования к данным\nХранить идентификатор карты, месяц, идентификатор операции, сумму покупки в тиынах, признак отправки и порог в тенге.\n\n### Требования к интеграции\nПриложение читает и сохраняет настройки через дочерний документ «Уведомление о расходах по карте — REST API». Повторная доставка одного события процессинга сохраняет исходный итог.\n\n### Требования к тестированию\n\n#### Тестирование требований\nзаполняются тестировщиками\n\n### Критерии приемки\n\n| Исходные условия | Действие | Ожидаемый результат |\n| :--- | :--- | :--- |\n| Расходы 48 500 ₸, порог 50 000 ₸ | Провести покупку на 1 500 ₸ | Итог 50 000 ₸ и один push |\n| Покупка 31 января в 23:58 на 4 000 ₸ | Провести 1 февраля в 00:03 по Алматы | Февральский счётчик вырос на 4 000 ₸ |\n| Расходы 19 900 ₸, порог 20 000 ₸ | Перевести 500 ₸ | Счётчик показывает 19 900 ₸ |\n\n### Ревью требований\nДокумент (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены.\n\n| Проверка | Создано или доступно | Проверено | Примечания |\n| :--- | :--- | :--- | :--- |\n| Техническое требование зафиксировано и покрывает бизнес-требование | Да / Нет | Да / Нет | |\n| Функциональная спецификация имеет структурированное описание (по стандарту, шаблону) | Да / Нет | Да / Нет | |\n| Sequence-диаграммы, предусмотрены взаимодействия систем, компонентов и решений | Да / Нет / Не требуется | Да / Нет / Не требуется | |\n| Требование покрывает спецификацию UX/UI дизайна | Да / Нет / Не требуется | Да / Нет / Не требуется | |\n| Реализация задачи/проекта предусматривает схему отката решений | Да / Нет / Не требуется | Да / Нет / Не требуется | При невозможности отката — варианты скрытия функционала |\n| Требование может быть протестировано | Да / Нет | Да / Нет | |\n| Требование предусматривает модель данных или поток, содержит описание | Да / Нет / Не требуется | Да / Нет / Не требуется | |\n| Требование не имеет противоречий или явных показателей операционных рисков | Да / Нет | Да / Нет | |\n| Требование содержит архитектуру и согласовано с архитекторами | Да / Нет / Не требуется | Да / Нет / Не требуется | Для архитектуры — чек-лист |\n| Все изменения, влияющие на иные продукты/системы в требовании, согласованы с ответственными лицами | Да / Нет / Не требуется | Да / Нет / Не требуется | |\n| Структура требований не несёт изменений и рисков информационной безопасности | Да / Нет | Да / Нет | По информационной безопасности — чек-лист |\n| В требовании присутствует схема полного бизнес-процесса и часть реализуемой доработки | Да / Нет | Да / Нет | |\n| Требование носит интеграционный характер и имеет четкую постановку реализации интеграционного взаимодействия | Да / Нет / Не требуется | Да / Нет / Не требуется | |\n| Поддерживается версионность документа / зафиксирована | Да / Нет | Да / Нет | |\n\n### Блок согласующих\n\n| Подразделение | ФИО ответственного | Подпись |\n| :--- | :--- | :--- |\n| | | |\n\n---\n\n## Часть B. REST API\n\nДочерний документ части A: «Уведомление о расходах по карте — REST API».\n\n### Общие параметры\n\n| Поле | Значение |\n| :--- | :--- |\n| **Description** | Сохранение порога. Функциональные требования: чтение порога |\n| **REST type** | GET |\n| **Authorization** | Bearer, сессия владельца карты |\n| **Controller** | AlertsController |\n| **URL type** | Dev / Prod |\n| **Request URL** | Dev: `/alerts/saveLimit` . Prod: — |\n| **CURL** | `curl -G \"$BASE/alerts/saveLimit\" -H \"Authorization: Bearer $TOKEN\" --data 'cardId=demo-42&amount=50000&enabled=1'` |\n| **Swagger** | — |\n| **Gitlab project** | Учебный контур |\n| **Framework** | Учебный контур |\n| **Author** | Школа тестирования |\n| **Developer** | Команда практикума |\n\n### Логика работы метода\n1. Проверить пользовательскую сессию.\n2. Проверить принадлежность карты клиенту.\n3. Проверить сумму и переключатель.\n4. Заменить настройку и вернуть результат сохранения.\n5. При отклонении суммы вернуть прежнее состояние и результат ERROR.\n\n### Особые правила\n1. Целое число тенге, обе границы включены.\n2. Повторное сохранение заменяет действующую настройку.\n3. Изменение порога сохраняет накопленные расходы.\n\n### Схема\n```text\nПриложение → AlertsController → хранилище настроек → AlertsController → приложение.\n```\n\n### Параметры запроса\n\n#### Path-параметры\nНе используются.\n\n#### Query-параметры\n\n| Parameter | Format | Size | Mandatory | Logic | Description | DB field |\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n| `cardId` | string | 1–64 | Да | Карта клиента | Идентификатор карты | `card_id` |\n| `amount` | integer | 32 bit | Да | 1 000–1 000 000 | Порог в тенге | `limit_kzt` |\n| `enabled` | integer | 1 знак | Да | 0 или 1 | Признак включения | `enabled` |\n\n#### Request body\n* **Content-Type:** `application/json` .\n* Тело не используется.\n\n### Ответ\nЕсли результат 200 или 201 — успешный. Если результат 400, 401 и далее — неуспешный.\n\n| Parameter | Format | Logic | Description | DB field |\n| :--- | :--- | :--- | :--- | :--- |\n| `result` | string | OK / ERROR | Исход сохранения | — |\n| `amount` | string | При успехе | Порог в тенге | `limit_kzt` |\n| `enabled` | string | «0» или «1» | Признак включения | `enabled` |\n| `message` | string | При ошибке | Описание ошибки | — |\n\n### Статусы\n\n**200.** Ответ в случае успешного выполнения метода.  \n**400.** Ответ в случае, если параметры запроса заполнены неверно.\n\n#### 200. Successful — Created\n```json\n{\"result\":\"OK\",\"amount\":\"50000\",\"enabled\":\"1\"}\n```\nили\n```json\n{\"result\":\"ERROR\",\"message\":\"Проверьте сумму\"}\n```\n\n**401.** Ответ в случае, если запрос выполнен без необходимой авторизации.  \n**403.** Ответ в случае, если на указанный ресурс доступ запрещен.  \n**500.** Ответ в случае, если произошла внутренняя ошибка сервера.\n\n#### 400. Unsuccessful — Bad request\n```json\n{\"message\":\"Некорректный запрос\"}\n```\n\n#### 401. Unsuccessful — Unauthorized\n```json\n{\"message\":\"Требуется вход\"}\n```\n\n#### 403. Unsuccessful — Forbidden\nДля чужой карты возвращается 404, как и для отсутствующей карты.  \n**404**\n```json\n{\"message\":\"Карта не найдена\"}\n```\n\n#### 500. Unsuccessful — Internal server error\n```json\n{\"message\":\"Ошибка сервиса\"}\n```\n",
+    "page_offsets": null
+  },
+  "requirements": [
+    {
+      "id": "R-001",
+      "source_id": "Ф-1",
+      "parent_id": null,
+      "kind": "functional",
+      "summary": "Держатель активной карты KZT задаёт целый порог; по умолчанию выключено",
+      "location": {
+        "section": "Часть A › Функциональные требования",
+        "quote": "Держатель активной карты KZT задаёт целый порог",
+        "char_start": 1362,
+        "char_end": 1409,
+        "page": null,
+        "verified": true
+      }
+    },
+    {
+      "id": "R-002",
+      "source_id": "Ф-2",
+      "parent_id": null,
+      "kind": "functional",
+      "summary": "Правила учёта расходов месяца: дата покупки, возвраты, исключения",
+      "location": {
+        "section": "Часть A › Функциональные требования",
+        "quote": "Месяц определяется по дате совершения покупки в Алматы.",
+        "char_start": 1495,
+        "char_end": 1550,
+        "page": null,
+        "verified": true
+      }
+    },
+    {
+      "id": "R-003",
+      "source_id": "Ф-3",
+      "parent_id": null,
+      "kind": "functional",
+      "summary": "Push при переходе через порог, не более одного в месяц",
+      "location": {
+        "section": "Часть A › Функциональные требования",
+        "quote": "Когда расходы переходят от суммы ниже порога к сумме, равной порогу или выше, клиент получает push.",
+        "char_start": 1691,
+        "char_end": 1790,
+        "page": null,
+        "verified": true
+      }
+    },
+    {
+      "id": "R-004",
+      "source_id": "Ф-4",
+      "parent_id": null,
+      "kind": "functional",
+      "summary": "Смена порога сохраняет накопленную сумму",
+      "location": {
+        "section": "Часть A › Функциональные требования",
+        "quote": "При изменении порога накопленная сумма сохраняется.",
+        "char_start": 1869,
+        "char_end": 1920,
+        "page": null,
+        "verified": true
+      }
+    },
+    {
+      "id": "R-005",
+      "source_id": null,
+      "parent_id": null,
+      "kind": "non_functional",
+      "summary": "Передача push на отправку в течение минуты",
+      "location": {
+        "section": "Часть A › Нефункциональные требования",
+        "quote": "Сервис передаёт push на отправку в течение минуты после получения события.",
+        "char_start": 2277,
+        "char_end": 2351,
+        "page": null,
+        "verified": true
+      }
+    },
+    {
+      "id": "R-006",
+      "source_id": null,
+      "parent_id": null,
+      "kind": "api",
+      "summary": "Метод сохранения порога AlertsController",
+      "location": {
+        "section": "Часть B › Общие параметры",
+        "quote": "Сохранение порога. Функциональные требования: чтение порога",
+        "char_start": 5440,
+        "char_end": 5499,
+        "page": null,
+        "verified": true
+      }
+    }
+  ],
+  "requirement_assessments": [
+    {
+      "requirement_id": "R-001",
+      "checks": [
+        {
+          "criterion": "necessary",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "implementation_free",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "unambiguous",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "complete",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "singular",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "feasible",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "verifiable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "correct",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "conforming",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "traceable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        }
+      ]
+    },
+    {
+      "requirement_id": "R-002",
+      "checks": [
+        {
+          "criterion": "necessary",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "implementation_free",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "unambiguous",
+          "verdict": "fail",
+          "comment": null,
+          "finding_ids": [
+            "D-003"
+          ]
+        },
+        {
+          "criterion": "complete",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "singular",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "feasible",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "verifiable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "correct",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "conforming",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "traceable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        }
+      ]
+    },
+    {
+      "requirement_id": "R-003",
+      "checks": [
+        {
+          "criterion": "necessary",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "implementation_free",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "unambiguous",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "complete",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "singular",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "feasible",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "verifiable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "correct",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "conforming",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "traceable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        }
+      ]
+    },
+    {
+      "requirement_id": "R-004",
+      "checks": [
+        {
+          "criterion": "necessary",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "implementation_free",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "unambiguous",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "complete",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "singular",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "feasible",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "verifiable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "correct",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "conforming",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "traceable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        }
+      ]
+    },
+    {
+      "requirement_id": "R-005",
+      "checks": [
+        {
+          "criterion": "necessary",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "implementation_free",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "unambiguous",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "complete",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "singular",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "feasible",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "verifiable",
+          "verdict": "fail",
+          "comment": null,
+          "finding_ids": [
+            "D-006"
+          ]
+        },
+        {
+          "criterion": "correct",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "conforming",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "traceable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        }
+      ]
+    },
+    {
+      "requirement_id": "R-006",
+      "checks": [
+        {
+          "criterion": "necessary",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "implementation_free",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "unambiguous",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "complete",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "singular",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "feasible",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "verifiable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "correct",
+          "verdict": "fail",
+          "comment": null,
+          "finding_ids": [
+            "D-005"
+          ]
+        },
+        {
+          "criterion": "conforming",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        },
+        {
+          "criterion": "traceable",
+          "verdict": "pass",
+          "comment": null,
+          "finding_ids": []
+        }
+      ]
+    }
+  ],
+  "set_assessment": {
+    "checks": [
+      {
+        "criterion": "set_complete",
+        "verdict": "pass",
+        "comment": null,
+        "finding_ids": []
+      },
+      {
+        "criterion": "set_consistent",
+        "verdict": "fail",
+        "comment": null,
+        "finding_ids": [
+          "D-001",
+          "D-002",
+          "D-004"
+        ]
+      },
+      {
+        "criterion": "set_feasible",
+        "verdict": "pass",
+        "comment": null,
+        "finding_ids": []
+      },
+      {
+        "criterion": "set_comprehensible",
+        "verdict": "pass",
+        "comment": null,
+        "finding_ids": []
+      },
+      {
+        "criterion": "set_validatable",
+        "verdict": "pass",
+        "comment": null,
+        "finding_ids": []
+      },
+      {
+        "criterion": "set_ranked",
+        "verdict": "pass",
+        "comment": null,
+        "finding_ids": []
+      },
+      {
+        "criterion": "set_modifiable",
+        "verdict": "fail",
+        "comment": null,
+        "finding_ids": [
+          "D-007"
+        ]
+      },
+      {
+        "criterion": "set_traceable",
+        "verdict": "pass",
+        "comment": null,
+        "finding_ids": []
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "D-001",
+      "scope": "set",
+      "requirement_ids": [
+        "R-002"
+      ],
+      "criterion": "set_consistent",
+      "severity": "critical",
+      "title": "Критерий приёмки противоречит правилу определения месяца",
+      "explanation": "Ф-2 относит покупку к месяцу по дате совершения, а критерий приёмки ожидает рост февральского счётчика для покупки, совершённой 31 января.",
+      "locations": [
+        {
+          "section": "Часть A › Функциональные требования",
+          "quote": "Месяц определяется по дате совершения покупки в Алматы.",
+          "char_start": 1495,
+          "char_end": 1550,
+          "page": null,
+          "verified": true
+        },
+        {
+          "section": "Часть A › Критерии приемки",
+          "quote": "Февральский счётчик вырос",
+          "char_start": 3068,
+          "char_end": 3093,
+          "page": null,
+          "verified": true
+        }
+      ],
+      "suggestion": "Уточнить, какая дата определяет месяц (совершения или проведения), и привести критерий приёмки в соответствие.",
+      "source": "llm"
+    },
+    {
+      "id": "D-002",
+      "scope": "set",
+      "requirement_ids": [
+        "R-003",
+        "R-004"
+      ],
+      "criterion": "set_consistent",
+      "severity": "critical",
+      "title": "Лимит одного push в месяц противоречит Ф-4",
+      "explanation": "Ф-3 разрешает не более одного push за месяц, а Ф-4 требует push «независимо от истории» после смены порога.",
+      "locations": [
+        {
+          "section": "Часть A › Функциональные требования",
+          "quote": "На карту приходится максимум один такой push за календарный месяц.",
+          "char_start": 1791,
+          "char_end": 1857,
+          "page": null,
+          "verified": true
+        },
+        {
+          "section": "Часть A › Функциональные требования",
+          "quote": "следующее достижение вызывает push независимо от истории предыдущей настройки",
+          "char_start": 1950,
+          "char_end": 2027,
+          "page": null,
+          "verified": true
+        }
+      ],
+      "suggestion": "Явно указать, сбрасывается ли лимит одного push при изменении порога.",
+      "source": "llm"
+    },
+    {
+      "id": "D-003",
+      "scope": "requirement",
+      "requirement_ids": [
+        "R-002"
+      ],
+      "criterion": "unambiguous",
+      "severity": "major",
+      "title": "Не определены часовой пояс и статус «проведённой» покупки",
+      "explanation": "«В Алматы» не задаёт смещение UTC явно; не определено, какие статусы операции считаются проведёнными.",
+      "locations": [
+        {
+          "section": "Часть A › Функциональные требования",
+          "quote": "В расходы входят проведённые покупки.",
+          "char_start": 1551,
+          "char_end": 1588,
+          "page": null,
+          "verified": true
+        }
+      ],
+      "suggestion": "Указать часовой пояс как смещение UTC и перечислить статусы операций, входящих в расходы.",
+      "source": "llm"
+    },
+    {
+      "id": "D-004",
+      "scope": "set",
+      "requirement_ids": [],
+      "criterion": "set_consistent",
+      "severity": "major",
+      "title": "Разные единицы суммы покупки и порога",
+      "explanation": "Сумма покупки хранится в тиынах, порог — в тенге; правило сравнения не описано.",
+      "locations": [
+        {
+          "section": "Часть A › Требования к данным",
+          "quote": "сумму покупки в тиынах, признак отправки и порог в тенге",
+          "char_start": 2437,
+          "char_end": 2493,
+          "page": null,
+          "verified": true
+        }
+      ],
+      "suggestion": "Хранить обе величины в одной единице или описать правило конвертации и округления.",
+      "source": "llm"
+    },
+    {
+      "id": "D-005",
+      "scope": "requirement",
+      "requirement_ids": [
+        "R-006"
+      ],
+      "criterion": "correct",
+      "severity": "critical",
+      "title": "Метод сохранения описан как GET и как чтение",
+      "explanation": "Description одновременно говорит о сохранении и чтении; для изменения состояния выбран GET.",
+      "locations": [
+        {
+          "section": "Часть B › Общие параметры",
+          "quote": "Сохранение порога. Функциональные требования: чтение порога",
+          "char_start": 5440,
+          "char_end": 5499,
+          "page": null,
+          "verified": true
+        },
+        {
+          "section": "Часть B › Общие параметры",
+          "quote": "| **REST type** | GET |",
+          "char_start": 5502,
+          "char_end": 5525,
+          "page": null,
+          "verified": true
+        }
+      ],
+      "suggestion": "Разделить чтение (GET) и сохранение (PUT/POST) порога в два метода.",
+      "source": "llm"
+    },
+    {
+      "id": "D-006",
+      "scope": "requirement",
+      "requirement_ids": [
+        "R-005"
+      ],
+      "criterion": "verifiable",
+      "severity": "major",
+      "title": "Время доставки без условий измерения",
+      "explanation": "Не указаны перцентиль, нагрузка и точка отсчёта/окончания измерения.",
+      "locations": [
+        {
+          "section": "Часть A › Нефункциональные требования",
+          "quote": "в течение минуты после получения события",
+          "char_start": 2310,
+          "char_end": 2350,
+          "page": null,
+          "verified": true
+        }
+      ],
+      "suggestion": "Например: «95% событий передаются в сервис push не позднее 60 с при нагрузке до N событий/с».",
+      "source": "llm"
+    },
+    {
+      "id": "D-007",
+      "scope": "set",
+      "requirement_ids": [],
+      "criterion": "set_modifiable",
+      "severity": "minor",
+      "title": "Не указаны версия и дата документа",
+      "explanation": "Версия документа не зафиксирована, блок согласующих пуст.",
+      "locations": [
+        {
+          "section": "Часть A › Ревью требований",
+          "quote": "Документ (версия/дата) в источнике не заполнен.",
+          "char_start": 3214,
+          "char_end": 3261,
+          "page": null,
+          "verified": true
+        }
+      ],
+      "suggestion": "Добавить версию, дату и согласующих.",
+      "source": "rule"
+    }
+  ],
+  "checklist": [
+    {
+      "question": "Требование может быть протестировано",
+      "answer": "no",
+      "comment": "НФТ без условий измерения, противоречивые критерии приёмки.",
+      "finding_ids": [
+        "D-001",
+        "D-006"
+      ]
+    },
+    {
+      "question": "Поддерживается версионность документа / зафиксирована",
+      "answer": "no",
+      "comment": "Версия и дата не заполнены.",
+      "finding_ids": [
+        "D-007"
+      ]
+    }
+  ],
+  "summary": {
+    "requirements_total": 6,
+    "findings_total": 7,
+    "by_severity": {
+      "critical": 3,
+      "major": 3,
+      "minor": 1
+    },
+    "critical_finding_ids": [
+      "D-001",
+      "D-002",
+      "D-005"
+    ]
+  },
+  "conclusion": {
+    "ready_for_development": false,
+    "ready_for_testing": false,
+    "rationale": "Есть противоречия между функциональными требованиями и критериями приёмки, а метод API описан некорректно.",
+    "top_fixes": [
+      "D-002: определить правило повторного push после смены порога",
+      "D-001: согласовать дату, определяющую месяц, с критериями приёмки",
+      "D-005: разделить чтение и сохранение порога в API"
+    ]
+  },
+  "usage": {
+    "llm_calls": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "cost_usd": null,
+    "duration_s": null
+  }
+}

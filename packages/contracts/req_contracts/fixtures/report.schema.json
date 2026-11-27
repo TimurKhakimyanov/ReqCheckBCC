@@ -1,0 +1,655 @@
+{
+  "$defs": {
+    "CheckVerdict": {
+      "enum": [
+        "pass",
+        "fail",
+        "not_applicable"
+      ],
+      "title": "CheckVerdict",
+      "type": "string"
+    },
+    "ChecklistAnswer": {
+      "enum": [
+        "yes",
+        "no",
+        "not_required"
+      ],
+      "title": "ChecklistAnswer",
+      "type": "string"
+    },
+    "ChecklistItem": {
+      "description": "Ответ агента на пункт чек-листа «Ревью требований» из шаблона документа (если он есть).",
+      "properties": {
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "answer": {
+          "$ref": "#/$defs/ChecklistAnswer"
+        },
+        "comment": {
+          "title": "Comment",
+          "type": "string"
+        },
+        "finding_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Finding Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "question",
+        "answer",
+        "comment"
+      ],
+      "title": "ChecklistItem",
+      "type": "object"
+    },
+    "Conclusion": {
+      "properties": {
+        "ready_for_development": {
+          "title": "Ready For Development",
+          "type": "boolean"
+        },
+        "ready_for_testing": {
+          "title": "Ready For Testing",
+          "type": "boolean"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "top_fixes": {
+          "description": "Что исправить в первую очередь, по порядку; со ссылками на D-xxx",
+          "items": {
+            "type": "string"
+          },
+          "title": "Top Fixes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ready_for_development",
+        "ready_for_testing",
+        "rationale",
+        "top_fixes"
+      ],
+      "title": "Conclusion",
+      "type": "object"
+    },
+    "Criterion": {
+      "enum": [
+        "necessary",
+        "implementation_free",
+        "unambiguous",
+        "complete",
+        "singular",
+        "feasible",
+        "verifiable",
+        "correct",
+        "conforming",
+        "traceable",
+        "set_complete",
+        "set_consistent",
+        "set_feasible",
+        "set_comprehensible",
+        "set_validatable",
+        "set_ranked",
+        "set_modifiable",
+        "set_traceable"
+      ],
+      "title": "Criterion",
+      "type": "string"
+    },
+    "CriterionCheck": {
+      "properties": {
+        "criterion": {
+          "$ref": "#/$defs/Criterion"
+        },
+        "verdict": {
+          "$ref": "#/$defs/CheckVerdict"
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Comment"
+        },
+        "finding_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Finding Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "criterion",
+        "verdict"
+      ],
+      "title": "CriterionCheck",
+      "type": "object"
+    },
+    "DocumentFormat": {
+      "enum": [
+        "pdf",
+        "docx",
+        "md",
+        "txt"
+      ],
+      "title": "DocumentFormat",
+      "type": "string"
+    },
+    "Finding": {
+      "properties": {
+        "id": {
+          "description": "D-001, D-002…",
+          "title": "Id",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/FindingScope"
+        },
+        "requirement_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requirement Ids",
+          "type": "array"
+        },
+        "criterion": {
+          "$ref": "#/$defs/Criterion"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        },
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "minItems": 1,
+          "title": "Locations",
+          "type": "array"
+        },
+        "suggestion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Предлагаемая исправленная формулировка",
+          "title": "Suggestion"
+        },
+        "source": {
+          "$ref": "#/$defs/FindingSource",
+          "default": "llm"
+        }
+      },
+      "required": [
+        "id",
+        "scope",
+        "criterion",
+        "severity",
+        "title",
+        "explanation",
+        "locations"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "FindingScope": {
+      "enum": [
+        "requirement",
+        "set"
+      ],
+      "title": "FindingScope",
+      "type": "string"
+    },
+    "FindingSource": {
+      "enum": [
+        "llm",
+        "rule"
+      ],
+      "title": "FindingSource",
+      "type": "string"
+    },
+    "ParsedDocument": {
+      "description": "Нормализованный текст документа. Все смещения в отчёте считаются от `text`.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "format": {
+          "$ref": "#/$defs/DocumentFormat"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "page_offsets": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Смещение начала каждой страницы в `text` (только для PDF)",
+          "title": "Page Offsets"
+        }
+      },
+      "required": [
+        "name",
+        "format",
+        "sha256",
+        "text"
+      ],
+      "title": "ParsedDocument",
+      "type": "object"
+    },
+    "Requirement": {
+      "properties": {
+        "id": {
+          "description": "Идентификатор в отчёте: R-001, R-002…; подтребования R-002.1",
+          "title": "Id",
+          "type": "string"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Идентификатор в документе (Ф-1), если был",
+          "title": "Source Id"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Для атомарного подтребования — id составного",
+          "title": "Parent Id"
+        },
+        "kind": {
+          "$ref": "#/$defs/RequirementKind"
+        },
+        "summary": {
+          "description": "Краткая формулировка для таблицы нарезки",
+          "title": "Summary",
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/SourceLocation"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "summary",
+        "location"
+      ],
+      "title": "Requirement",
+      "type": "object"
+    },
+    "RequirementAssessment": {
+      "properties": {
+        "requirement_id": {
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CriterionCheck"
+          },
+          "title": "Checks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "checks"
+      ],
+      "title": "RequirementAssessment",
+      "type": "object"
+    },
+    "RequirementKind": {
+      "enum": [
+        "functional",
+        "non_functional",
+        "data",
+        "integration",
+        "api",
+        "ui",
+        "acceptance",
+        "other"
+      ],
+      "title": "RequirementKind",
+      "type": "string"
+    },
+    "RunPassport": {
+      "properties": {
+        "document_name": {
+          "title": "Document Name",
+          "type": "string"
+        },
+        "document_sha256": {
+          "title": "Document Sha256",
+          "type": "string"
+        },
+        "run_at": {
+          "format": "date-time",
+          "title": "Run At",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "agent_version": {
+          "description": "git commit или тег агента",
+          "title": "Agent Version",
+          "type": "string"
+        },
+        "standards": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Standards",
+          "type": "array"
+        }
+      },
+      "required": [
+        "document_name",
+        "document_sha256",
+        "run_at",
+        "provider",
+        "model",
+        "agent_version"
+      ],
+      "title": "RunPassport",
+      "type": "object"
+    },
+    "SetAssessment": {
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CriterionCheck"
+          },
+          "title": "Checks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "checks"
+      ],
+      "title": "SetAssessment",
+      "type": "object"
+    },
+    "Severity": {
+      "enum": [
+        "critical",
+        "major",
+        "minor"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "SourceLocation": {
+      "description": "Ссылка на конкретное место документа. Каждое нарушение обязано иметь хотя бы одну.",
+      "properties": {
+        "section": {
+          "description": "Путь раздела, напр. «Часть A › Функциональные требования»",
+          "title": "Section",
+          "type": "string"
+        },
+        "quote": {
+          "description": "Дословная цитата из документа",
+          "title": "Quote",
+          "type": "string"
+        },
+        "char_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Смещение цитаты в ParsedDocument.text",
+          "title": "Char Start"
+        },
+        "char_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Char End"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Номер страницы с 1 (для PDF)",
+          "title": "Page"
+        },
+        "verified": {
+          "default": false,
+          "description": "Цитата найдена в тексте документа кодом (защита от галлюцинаций)",
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "section",
+        "quote"
+      ],
+      "title": "SourceLocation",
+      "type": "object"
+    },
+    "Summary": {
+      "properties": {
+        "requirements_total": {
+          "title": "Requirements Total",
+          "type": "integer"
+        },
+        "findings_total": {
+          "title": "Findings Total",
+          "type": "integer"
+        },
+        "by_severity": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/Severity"
+          },
+          "title": "By Severity",
+          "type": "object"
+        },
+        "critical_finding_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Critical Finding Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requirements_total",
+        "findings_total",
+        "by_severity",
+        "critical_finding_ids"
+      ],
+      "title": "Summary",
+      "type": "object"
+    },
+    "Usage": {
+      "properties": {
+        "llm_calls": {
+          "default": 0,
+          "title": "Llm Calls",
+          "type": "integer"
+        },
+        "prompt_tokens": {
+          "default": 0,
+          "title": "Prompt Tokens",
+          "type": "integer"
+        },
+        "completion_tokens": {
+          "default": 0,
+          "title": "Completion Tokens",
+          "type": "integer"
+        },
+        "cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cost Usd"
+        },
+        "duration_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration S"
+        }
+      },
+      "title": "Usage",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "passport": {
+      "$ref": "#/$defs/RunPassport"
+    },
+    "document": {
+      "$ref": "#/$defs/ParsedDocument"
+    },
+    "requirements": {
+      "items": {
+        "$ref": "#/$defs/Requirement"
+      },
+      "title": "Requirements",
+      "type": "array"
+    },
+    "requirement_assessments": {
+      "items": {
+        "$ref": "#/$defs/RequirementAssessment"
+      },
+      "title": "Requirement Assessments",
+      "type": "array"
+    },
+    "set_assessment": {
+      "$ref": "#/$defs/SetAssessment"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/Finding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "checklist": {
+      "items": {
+        "$ref": "#/$defs/ChecklistItem"
+      },
+      "title": "Checklist",
+      "type": "array"
+    },
+    "summary": {
+      "$ref": "#/$defs/Summary"
+    },
+    "conclusion": {
+      "$ref": "#/$defs/Conclusion"
+    },
+    "usage": {
+      "$ref": "#/$defs/Usage"
+    }
+  },
+  "required": [
+    "passport",
+    "document",
+    "requirements",
+    "requirement_assessments",
+    "set_assessment",
+    "findings",
+    "summary",
+    "conclusion"
+  ],
+  "title": "Report",
+  "type": "object"
+}

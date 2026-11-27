@@ -1,0 +1,250 @@
+# ReqCheck — полный стек. Запуск: cp .env.example .env && docker compose up -d --build
+# Профили: monitoring, offline, gpu, test, cli — см. docs/architecture.md.
+# Разделы помечены владельцем; правьте только свой раздел.
+name: reqcheck
+
+x-python-build: &python-build
+  context: .
+  args:
+    AGENT_VERSION: ${AGENT_VERSION:-dev}
+
+x-app-env: &app-env
+  APP_ENV: ${APP_ENV:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+  QDRANT_URL: http://qdrant:6333
+  QDRANT_API_KEY: ${QDRANT_API_KEY}
+  S3_ENDPOINT_URL: http://seaweedfs:8333
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+  S3_SECRET_KEY: ${S3_SECRET_KEY}
+  S3_BUCKET: ${S3_BUCKET:-reqcheck}
+  EMBEDDER_URL: http://embedder:8001
+  APP_SECRET_KEY: ${APP_SECRET_KEY}
+  APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+  DEFAULT_LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+  DEFAULT_LLM_MODEL: ${LLM_MODEL:-}
+  OPENAI_COMPATIBLE_BASE_URL: ${OPENAI_COMPATIBLE_BASE_URL:-http://ollama:11434/v1}
+
+services:
+  # ===================== Веб (сессия «Веб») =====================
+  web:
+    build: { context: ., dockerfile: services/web/Dockerfile, target: runtime }
+    restart: unless-stopped
+    depends_on: [api]
+    ports: ["${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-8080}:8080"]
+    networks: [frontend]
+
+  # ===================== Бэкенд (сессия «Бэкенд») =====================
+  api:
+    build: { <<: *python-build, dockerfile: services/api/Dockerfile, target: runtime }
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_started }
+      seaweedfs: { condition: service_started }
+    networks: [frontend, backend]
+
+  migrate:
+    build: { <<: *python-build, dockerfile: services/api/Dockerfile, target: runtime }
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [backend]
+
+  worker:
+    build: { <<: *python-build, dockerfile: services/worker/Dockerfile, target: runtime }
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    networks: [backend]
+
+  embedder:
+    build:
+      <<: *python-build
+      dockerfile: services/embedder/Dockerfile
+      target: runtime
+      args:
+        EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-intfloat/multilingual-e5-small}
+    restart: unless-stopped
+    environment:
+      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-local}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-intfloat/multilingual-e5-small}
+    networks: [backend]
+
+  # ===================== Ядро / CLI (сессия «Ядро») =====================
+  cli:
+    build: { <<: *python-build, dockerfile: services/cli/Dockerfile, target: runtime }
+    profiles: [cli]
+    env_file: [{ path: .env, required: false }]
+    volumes: ["./data:/data"]
+    networks: [backend]
+
+  # ===================== Инфраструктура (сессия «Инфраструктура») =====================
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+    networks: [backend]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 5s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    networks: [backend]
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    volumes: ["qdrant-data:/qdrant/storage"]
+    networks: [backend]
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.97
+    restart: unless-stopped
+    command: ["server", "-dir=/data", "-s3", "-s3.config=/etc/seaweedfs/s3.json"]
+    volumes:
+      - seaweedfs-data:/data
+      - ./deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    networks: [backend]
+
+  ollama:
+    image: ollama/ollama:0.11.10
+    profiles: [offline]
+    volumes: ["ollama-data:/root/.ollama"]
+    networks: [backend]
+
+  ollama-gpu:
+    image: ollama/ollama:0.11.10
+    profiles: [gpu]
+    volumes: ["ollama-data:/root/.ollama"]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+    networks:
+      backend:
+        aliases: [ollama]
+
+  # --- Мониторинг (профиль monitoring) ---
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [monitoring]
+    volumes:
+      - ./deploy/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks: [backend]
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    profiles: [monitoring]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    ports: ["${BIND_ADDR:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"]
+    volumes:
+      - ./deploy/monitoring/grafana:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    networks: [backend]
+
+  loki:
+    image: grafana/loki:3.5.3
+    profiles: [monitoring]
+    volumes: ["loki-data:/loki"]
+    networks: [backend]
+
+  alloy:
+    image: grafana/alloy:v1.10.2
+    profiles: [monitoring]
+    command: ["run", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./deploy/monitoring/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [backend]
+
+  # ===================== Тесты (профиль test; запуск только в Docker) =====================
+  # docker compose --profile test run --rm --build test-<имя>
+  test-contracts:
+    build: { context: ., dockerfile: packages/contracts/Dockerfile, target: test }
+    profiles: [test]
+    network_mode: none
+
+  test-core:
+    build: { <<: *python-build, dockerfile: packages/core/Dockerfile, target: test }
+    profiles: [test]
+    network_mode: none
+
+  test-api:
+    build: { <<: *python-build, dockerfile: services/api/Dockerfile, target: test }
+    profiles: [test]
+    environment:
+      <<: *app-env
+      APP_ENV: test
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: test-password
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [backend]
+
+  test-worker:
+    build: { <<: *python-build, dockerfile: services/worker/Dockerfile, target: test }
+    profiles: [test]
+    environment:
+      <<: *app-env
+      APP_ENV: test
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [backend]
+
+  test-embedder:
+    build: { <<: *python-build, dockerfile: services/embedder/Dockerfile, target: test }
+    profiles: [test]
+    network_mode: none
+
+  test-web:
+    build: { context: ., dockerfile: services/web/Dockerfile, target: test }
+    profiles: [test]
+    network_mode: none
+
+networks:
+  frontend:
+  backend:
+
+volumes:
+  postgres-data:
+  redis-data:
+  qdrant-data:
+  seaweedfs-data:
+  ollama-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:
