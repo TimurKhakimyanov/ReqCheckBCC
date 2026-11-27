@@ -14,6 +14,7 @@ import { Spinner } from '@/components/ui/misc'
 import { ProviderErrorNote } from '@/features/errors/ProviderErrorNote'
 import { useModels } from '@/features/runs/LaunchRunDialog'
 import { formatDate } from '@/shared/format'
+import { AdvancedFields, advancedFrom, advancedToUpdate, type AdvancedDraft } from './AdvancedFields'
 
 export const PROBE_DEBOUNCE_MS = 700
 
@@ -74,6 +75,9 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
   const [baseUrl, setBaseUrl] = useState(p.base_url ?? '')
   const [enabled, setEnabled] = useState(p.enabled)
   const [model, setModel] = useState(p.default_model ?? '')
+  const [adv, setAdv] = useState<AdvancedDraft>(() => advancedFrom(p))
+  const advanced = advancedToUpdate(adv)
+  const advInvalid = Object.keys(advanced.errors).length > 0
   const saved = useModels(isProviderConfigured(p) ? p.provider : undefined)
   const probe = useProviderProbe(p, apiKey, baseUrl)
 
@@ -98,7 +102,9 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
+    if (advInvalid) return
     save.mutate({
+      ...advanced.update,
       enabled,
       default_model: model.trim(),
       ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
@@ -188,6 +194,12 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
               )}
             </span>
           </div>
+          <AdvancedFields
+            id={`adv-${p.provider}`}
+            draft={adv}
+            onChange={setAdv}
+            defaultOpen={p.extra_body != null || p.extra_body_set_review != null || p.max_output_tokens != null}
+          />
           {probe.result &&
             (probe.result.ok ? (
               <div role="status" className="flex items-center gap-2 rounded-md bg-success/10 px-3 py-2 text-sm text-success">
@@ -216,7 +228,7 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
                 {probe.pending ? <Spinner /> : <PlugZap />}
                 {t('settings.test')}
               </Button>
-              <Button type="submit" size="sm" disabled={save.isPending || (compat && !baseUrl.trim())}>
+              <Button type="submit" size="sm" disabled={save.isPending || advInvalid || (compat && !baseUrl.trim())}>
                 {save.isPending ? <Spinner /> : <Save />}
                 {t('common.save')}
               </Button>

@@ -63,6 +63,12 @@ export interface ProviderSettings {
   base_url: string | null
   default_model: string | null
   updated_at: string | null
+  /** Доп. поля тела запроса (OpenAI-совместимые серверы); null — нет */
+  extra_body?: Record<string, unknown> | null
+  /** Переопределение extra_body для проверки набора; null — используется extra_body */
+  extra_body_set_review?: Record<string, unknown> | null
+  /** Лимит токенов ответа; null — ядро выбирает с запасом */
+  max_output_tokens?: number | null
 }
 
 export interface ProviderUpdate {
@@ -70,6 +76,9 @@ export interface ProviderUpdate {
   base_url?: string
   enabled?: boolean
   default_model?: string
+  extra_body?: Record<string, unknown> | null
+  extra_body_set_review?: Record<string, unknown> | null
+  max_output_tokens?: number | null
 }
 
 export interface ProviderTestResult {

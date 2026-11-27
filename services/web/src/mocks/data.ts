@@ -144,7 +144,7 @@ function seed(): Db {
     password: MOCK_PASSWORD,
     loggedIn: readSession(),
     providers: {
-      gemini: { provider: 'gemini', enabled: true, has_key: true, key_hint: '…a1b2', base_url: null, default_model: 'gemini-2.5-flash', updated_at: ago(300) },
+      gemini: { provider: 'gemini', enabled: true, has_key: true, key_hint: '…a1b2', base_url: null, default_model: 'gemini-2.5-flash', updated_at: ago(300), extra_body: null, extra_body_set_review: null, max_output_tokens: null },
       openai: { provider: 'openai', enabled: true, has_key: false, key_hint: null, base_url: null, default_model: 'gpt-4.1-mini', updated_at: null },
       anthropic: { provider: 'anthropic', enabled: false, has_key: false, key_hint: null, base_url: null, default_model: 'claude-sonnet-4-5', updated_at: null },
       openai_compatible: { provider: 'openai_compatible', enabled: true, has_key: false, key_hint: null, base_url: 'http://vllm.example.local:8000/v1', default_model: 'local-model', updated_at: ago(300) },

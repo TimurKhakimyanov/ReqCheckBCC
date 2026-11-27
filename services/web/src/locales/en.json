@@ -369,6 +369,23 @@
       "providers": "Providers",
       "params": "Parameters",
       "account": "Account"
+    },
+    "advanced": {
+      "title": "Advanced",
+      "hint": "For OpenAI-compatible servers (vLLM, Ollama): fields added to the body of every model request. Usually not needed.",
+      "extraBody": "Extra request parameters (JSON)",
+      "extraBodyHint": "Added to every model call. For example, turn off reasoning on a vLLM model.",
+      "extraBodySetReview": "For the set review (JSON)",
+      "extraBodySetReviewHint": "Replaces the parameters above for the step that looks for contradictions in the requirement set. Empty — same as above.",
+      "maxTokens": "Max output tokens",
+      "maxTokensHint": "Empty — the agent picks a safe value. Reasoning models need more: reasoning also spends tokens.",
+      "presetVllm": "vLLM: no reasoning, reasoning for the set review",
+      "presetVllmHint": "enable_thinking=false for regular calls, true for the contradiction search; up to 48,000 output tokens",
+      "clear": "Clear",
+      "jsonInvalid": "Not valid JSON: {{detail}}",
+      "jsonNotObject": "A JSON object in curly braces { … } is required",
+      "tokensRange": "A whole number from 1 to {{max}}",
+      "set": "set"
     }
   },
   "usage": {

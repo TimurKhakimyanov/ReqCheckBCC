@@ -1,7 +1,7 @@
 // MSW-обработчики для всех методов docs/api.md. Включаются VITE_USE_MOCKS=true (браузер) и в тестах (node).
 import { delay, http, HttpResponse, type JsonBodyType, type PathParams } from 'msw'
 import { formatSSE } from '@/api/sse'
-import type { AppSettingsUpdate, DocumentFormat, ExportFormat, FindingReview, ProviderId, ReviewStatus, RunCreate } from '@/api/types'
+import type { AppSettingsUpdate, DocumentFormat, ExportFormat, FindingReview, ProviderId, ProviderUpdate, ReviewStatus, RunCreate } from '@/api/types'
 import { EMBEDDINGS_DIM_LIMITS, EMBEDDINGS_PROVIDERS, isProviderConfigured, isTerminal, PROVIDERS, SETTING_LIMITS } from '@/api/types'
 import {
   probeProvider,
@@ -149,7 +149,21 @@ export const handlers = [
     guard(async ({ request, params }: { request: Request; params: Record<string, string> }) => {
       const p = db.providers[params.provider as ProviderId]
       if (!p) return err(404, 'Unknown provider')
-      const body = (await request.json()) as { api_key?: string; base_url?: string; enabled?: boolean; default_model?: string }
+      const body = (await request.json()) as ProviderUpdate
+      const errors: { loc: (string | number)[]; msg: string; type: string }[] = []
+      for (const k of ['extra_body', 'extra_body_set_review'] as const) {
+        const v = body[k]
+        if (v !== undefined && v !== null && (typeof v !== 'object' || Array.isArray(v)))
+          errors.push({ loc: ['body', k], msg: 'Input should be a valid dictionary', type: 'dict_type' })
+      }
+      const mot = body.max_output_tokens
+      if (mot !== undefined && mot !== null && (!Number.isInteger(mot) || mot < 1))
+        errors.push({ loc: ['body', 'max_output_tokens'], msg: 'Input should be a positive integer', type: 'int_type' })
+      if (errors.length)
+        return HttpResponse.json({ detail: `Некорректные данные: ${errors[0].loc[1]}: ${errors[0].msg}`, code: 'validation_error', errors }, { status: 422 })
+      if (body.extra_body !== undefined) p.extra_body = body.extra_body
+      if (body.extra_body_set_review !== undefined) p.extra_body_set_review = body.extra_body_set_review
+      if (body.max_output_tokens !== undefined) p.max_output_tokens = body.max_output_tokens
       if (body.api_key !== undefined) {
         p._key = body.api_key || undefined
         p.has_key = !!body.api_key
