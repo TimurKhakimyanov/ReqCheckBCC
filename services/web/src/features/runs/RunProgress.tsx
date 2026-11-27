@@ -9,6 +9,7 @@ import { isTerminal, PIPELINE_STAGES } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress, Spinner } from '@/components/ui/misc'
+import { ProviderErrorNote } from '@/features/errors/ProviderErrorNote'
 import { formatDate } from '@/shared/format'
 import { cn } from '@/shared/utils'
 import { LaunchRunDialog } from './LaunchRunDialog'
@@ -87,11 +88,7 @@ export function RunProgress({ run }: { run: Run }) {
             {message && !failed && <p className="text-sm text-muted-foreground">{message}</p>}
           </div>
 
-          {failed && (run.error || message) && (
-            <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-              {run.error || message}
-            </div>
-          )}
+          {failed && (run.error || message) && <ProviderErrorNote raw={run.error || message || ''} />}
 
           <ol className="grid gap-0" aria-label={t('progress.stages')}>
             {PIPELINE_STAGES.filter((s) => s !== 'done').map((s, i) => {

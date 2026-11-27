@@ -9,6 +9,7 @@ import { Markdown } from '@/components/Markdown'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/misc'
+import { ProviderErrorNote } from '@/features/errors/ProviderErrorNote'
 import { useReport } from '@/features/report/context'
 import { cn } from '@/shared/utils'
 
@@ -20,6 +21,7 @@ export function ChatPanel({ runId, onClose }: { runId: string; onClose: () => vo
   const history = useQuery({ queryKey: key, queryFn: () => api.chat(runId) })
   const [input, setInput] = useState('')
   const [pending, setPending] = useState<{ question: string; answer: string } | null>(null)
+  const [chatError, setChatError] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
 
@@ -32,6 +34,7 @@ export function ChatPanel({ runId, onClose }: { runId: string; onClose: () => vo
     const message = text.trim()
     if (!message || pending) return
     setInput('')
+    setChatError(null)
     setPending({ question: message, answer: '' })
     const ctrl = new AbortController()
     abort.current = ctrl
@@ -46,7 +49,7 @@ export function ChatPanel({ runId, onClose }: { runId: string; onClose: () => vo
         },
       )
     } catch (e) {
-      if ((e as Error).name !== 'AbortError') toast.error((e as Error).message)
+      if ((e as Error).name !== 'AbortError') setChatError((e as Error).message)
     } finally {
       abort.current = null
       await qc.invalidateQueries({ queryKey: key })
@@ -124,6 +127,7 @@ export function ChatPanel({ runId, onClose }: { runId: string; onClose: () => vo
             )}
           </div>
         )}
+        {chatError && <ProviderErrorNote raw={chatError} compact className="mt-3" />}
         <div ref={bottom} />
       </div>
 

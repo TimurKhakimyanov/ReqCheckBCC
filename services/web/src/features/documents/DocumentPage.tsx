@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState, ErrorNote, PageHeader, Skeleton, Table, TBody, TD, TH, THead, TR } from '@/components/ui/misc'
 import { LaunchRunDialog } from '@/features/runs/LaunchRunDialog'
 import { ReadinessBadge, RunStatusBadge, SeverityCounts } from '@/features/runs/RunBits'
+import { useProviderErrorTitle } from '@/features/errors/ProviderErrorNote'
 import { downloadFile, formatBytes, formatDate, formatDuration } from '@/shared/format'
 
 export function DocumentPage() {
@@ -19,6 +20,7 @@ export function DocumentPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [launch, setLaunch] = useState(false)
+  const errorTitle = useProviderErrorTitle()
   const doc = useQuery({ queryKey: ['documents', id], queryFn: () => api.document(id) })
   const runs = useQuery({
     queryKey: ['runs', { document_id: id }],
@@ -102,7 +104,11 @@ export function DocumentPage() {
                     </TD>
                     <TD>
                       <RunStatusBadge status={r.status} />
-                      {r.error && <div className="mt-1 max-w-64 truncate text-xs text-destructive" title={r.error}>{r.error}</div>}
+                      {r.error && (
+                        <div className="mt-1 max-w-64 text-xs text-destructive" title={r.error}>
+                          {errorTitle(r.error)}
+                        </div>
+                      )}
                     </TD>
                     <TD className="text-muted-foreground">
                       {t(`provider.${r.provider}`, { defaultValue: r.provider })} · {r.model}
