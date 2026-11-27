@@ -1,7 +1,7 @@
 """Рендер отчёта: Markdown (основной формат), JSON, DOCX и PDF.
 
-DOCX и PDF строятся из того же Markdown (подмножество: заголовки, абзацы, списки, таблицы, жирный),
-поэтому содержание всех форматов совпадает.
+DOCX и тело PDF строятся из того же Markdown (подмножество: заголовки, абзацы, списки, таблицы, жирный),
+поэтому содержание всех форматов совпадает. У PDF есть ещё титульная страница (см. `req_core.pdf`).
 """
 
 from __future__ import annotations
@@ -79,6 +79,11 @@ def _where(loc: SourceLocation) -> str:
         parts.append(f"символы {loc.char_start}–{loc.char_end}")
     mark = "цитата подтверждена в тексте" if loc.verified else "⚠ цитата модели не найдена в тексте дословно"
     return ", ".join(parts) + f" ({mark})"
+
+
+def _check_comment(c) -> str:
+    """«D-003: комментарий», «D-003» или «комментарий» — без висячего двоеточия."""
+    return ": ".join(x for x in (", ".join(c.finding_ids), _one_line(c.comment or "")) if x)
 
 
 def _finding_block(f: Finding) -> list[str]:
@@ -180,7 +185,7 @@ def render_markdown(report: Report) -> str:
             fails = [c for c in a.checks if c.verdict == CheckVerdict.FAIL]
             L += _table(["Критерий", "Результат", "Комментарий"], [
                 [_crit(c.criterion), VERDICT_RU[c.verdict],
-                 (", ".join(c.finding_ids) + ": " if c.finding_ids else "") + (c.comment or "")]
+                 _check_comment(c)]
                 for c in a.checks
             ]) + [""]
             if not fails:
@@ -201,7 +206,7 @@ def render_markdown(report: Report) -> str:
     L += ["## 4. Проверка всего набора требований", ""]
     L += _table(["Критерий набора", "Результат", "Комментарий"], [
         [_crit(c.criterion), VERDICT_RU[c.verdict],
-         (", ".join(c.finding_ids) + ": " if c.finding_ids else "") + _one_line(c.comment or "")]
+         _check_comment(c)]
         for c in report.set_assessment.checks
     ]) + [""]
     set_f = [f for f in report.findings if f.scope == FindingScope.SET]
@@ -420,69 +425,11 @@ def _find_font() -> tuple[str, str]:
                        "или REQCHECK_PDF_FONT_DIR)")
 
 
-def render_pdf(md: str) -> bytes:
-    from fpdf import FPDF
+def render_pdf(report: Report, md: str | None = None) -> bytes:
+    """PDF: титульная страница из `Report` + тело из того же Markdown (вёрстка — в `req_core.pdf`)."""
+    from .pdf import render_pdf_report
 
-    regular, bold = _find_font()
-    pdf = FPDF(format="A4")
-    pdf.set_margins(14, 14, 14)
-    pdf.set_auto_page_break(True, 14)
-    pdf.add_font("DejaVu", "", regular)
-    pdf.add_font("DejaVu", "B", bold)
-    pdf.add_font("DejaVu", "I", regular)
-    pdf.add_font("DejaVu", "BI", bold)
-    pdf.add_page()
-    pdf.set_font("DejaVu", "", 9.5)
-    width = pdf.w - pdf.l_margin - pdf.r_margin
-
-    def write_inline(text: str, size: float = 9.5, h: float = 5.0, prefix: str = "") -> None:
-        if prefix:
-            pdf.set_font("DejaVu", "", size)
-            pdf.write(h, prefix)
-        for st, t in _inline_segments(text):
-            pdf.set_font("DejaVu", "B" if st == "B" else "", size)
-            pdf.write(h, t)
-        pdf.ln(h + 1)
-
-    for b in _blocks(md):
-        kind = b[0]
-        if kind == "heading":
-            size = {1: 15, 2: 13, 3: 11, 4: 10}.get(b[1], 10)
-            pdf.ln(2)
-            pdf.set_font("DejaVu", "B", size)
-            pdf.multi_cell(width, size * 0.5, _plain(b[2]), new_x="LMARGIN", new_y="NEXT")
-            pdf.ln(1)
-        elif kind == "table":
-            header, rows = b[1], b[2]
-            ncol = len(header)
-            lens = [max([len(_plain(header[j]))] + [len(_plain(r[j])) if j < len(r) else 0 for r in rows])
-                    for j in range(ncol)]
-            weights = [min(max(x, 6), 120) for x in lens]
-            total = sum(weights)
-            cols = [max(14.0, width * w / total) for w in weights]
-            scale = width / sum(cols)
-            cols = [c * scale for c in cols]
-            pdf.set_font("DejaVu", "", 8)
-            with pdf.table(col_widths=cols, width=width, line_height=4.2, text_align="LEFT",
-                           first_row_as_headings=True) as table:
-                hr = table.row()
-                for h in header:
-                    hr.cell(_plain(h))
-                for r in rows:
-                    row = table.row()
-                    for j in range(ncol):
-                        row.cell(_plain(r[j]) if j < len(r) else "")
-            pdf.ln(2)
-            pdf.set_font("DejaVu", "", 9.5)
-        elif kind == "bullet":
-            write_inline(b[1], prefix="• ")
-        elif kind in ("number", "para"):
-            write_inline(b[1])
-        elif kind == "rule":
-            y = pdf.get_y() + 1
-            pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
-            pdf.ln(3)
-    return bytes(pdf.output())
+    return render_pdf_report(report, md)
 
 
 # ---------------------------------------------------------------- вход
@@ -497,5 +444,5 @@ def render_report(report: Report, fmt: str) -> bytes:
     if fmt == "docx":
         return render_docx(md)
     if fmt == "pdf":
-        return render_pdf(md)
+        return render_pdf(report, md)
     raise ValueError(f"Неизвестный формат отчёта: {fmt} (md, json, docx, pdf)")
