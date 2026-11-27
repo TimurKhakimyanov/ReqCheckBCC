@@ -8,6 +8,7 @@ PDF рендерится в два прохода: первый узнаёт с�
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
@@ -125,8 +126,8 @@ class _Pdf(FPDF):
         self.set_margins(MARGIN_X, MARGIN_TOP, MARGIN_X)
         self.set_auto_page_break(True, MARGIN_BOTTOM)
         self.set_title(f"Отчёт о проверке требований: {report.passport.document_name}")
-        self.set_author("ReqCheck")
-        self.set_creator(f"ReqCheck {report.passport.agent_version}")
+        self.set_author("Zoe")
+        self.set_creator(f"Zoe {report.passport.agent_version}")
         self.set_lang("ru")
 
     # -- примитивы
@@ -164,7 +165,7 @@ class _Pdf(FPDF):
         p = self.report.passport
         self.set_xy(self.l_margin, 9)
         self.font(7.5, "B")
-        self.cell(self.get_string_width("ReqCheck") + 1, 4, "ReqCheck")
+        self.cell(self.get_string_width("Zoe") + 1, 4, "Zoe")
         self.font(7.5, color=MUTED)
         self.cell(0, 4, " · Отчёт о проверке требований")
         self.set_xy(self.l_margin, 9)
@@ -208,6 +209,32 @@ def _verdict(report: Report) -> tuple[str, str, RGB, RGB, RGB]:
     return ("✕" if sev == Severity.CRITICAL else "!"), title, SEV_COLOR[sev], SEV_TINT[sev], SEV_DARK[sev]
 
 
+# Знак Zoe (тот же, что в вебе): пять кругов в поле 100×100, два верхних левых соединены перемычкой.
+_LOGO_CIRCLES = ((24, 22, 18), (52, 50, 15), (83, 19, 14), (21, 80, 15), (84, 83, 9))
+_LOGO_NECK = ((23.06, 39.98), (33.86, 42.26), (37.02, 50.79), (52.79, 35.02), (44.26, 31.86), (41.98, 21.06))
+
+
+def _logo(pdf: _Pdf, x: float, y: float, size: float) -> None:
+    """Белый знак на чёрной плашке со скруглёнными углами, сторона size мм."""
+    pdf.set_fill_color(0, 0, 0)
+    pdf.rect(x, y, size, size, style="F", round_corners=True, corner_radius=size * 0.22)
+    pad = size * 0.16
+    k = (size - 2 * pad) / 100
+    ox, oy = x + pad, y + pad
+    pt = lambda px, py: (ox + px * k, oy + py * k)  # noqa: E731
+    pdf.set_fill_color(255, 255, 255)
+    for cx, cy, r in _LOGO_CIRCLES:
+        pdf.polygon([pt(cx + r * math.cos(a), cy + r * math.sin(a)) for a in (i * math.tau / 40 for i in range(40))],
+                    style="F")
+    p1, c1, q1, q2, c2, p2 = _LOGO_NECK
+
+    def quad(a: tuple, c: tuple, b: tuple) -> list:
+        return [pt((1 - t) ** 2 * a[0] + 2 * (1 - t) * t * c[0] + t * t * b[0],
+                   (1 - t) ** 2 * a[1] + 2 * (1 - t) * t * c[1] + t * t * b[1]) for t in (i / 12 for i in range(13))]
+
+    pdf.polygon(quad(p1, c1, q1) + quad(q2, c2, p2), style="F")
+
+
 def _cover(pdf: _Pdf, toc: list[tuple[str, str]], pages: dict[str, int]) -> None:
     r = pdf.report
     p, s, c = r.passport, r.summary, r.conclusion
@@ -216,12 +243,10 @@ def _cover(pdf: _Pdf, toc: list[tuple[str, str]], pages: dict[str, int]) -> None
 
     # бренд и стандарты
     y = 15.0
-    pdf.set_draw_color(*INK)
-    pdf.set_line_width(0.75)
-    pdf.rect(L + 0.4, y + 0.9, 3.4, 3.4, round_corners=True, corner_radius=0.8)
-    pdf.set_xy(L + 6.2, y)
+    _logo(pdf, L, y - 0.2, 5.6)
+    pdf.set_xy(L + 7.4, y)
     pdf.font(12.5, "B")
-    pdf.cell(40, 5.2, "ReqCheck")
+    pdf.cell(40, 5.2, "Zoe")
     pdf.set_xy(L, y + 0.4)
     pdf.font(8.5, color=MUTED, mono=True)
     pdf.cell(W, 4.5, "ISO/IEC/IEEE 29148 · IEEE 830", align="R")

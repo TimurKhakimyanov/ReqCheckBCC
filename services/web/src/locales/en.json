@@ -3,7 +3,7 @@
     "name": "English"
   },
   "app": {
-    "name": "ReqCheck",
+    "name": "Zoe",
     "mockMode": "Demo mode: mock data, no backend required"
   },
   "nav": {
@@ -699,7 +699,7 @@
     },
     "connection": {
       "title": "Cannot reach the provider",
-      "hint": "The model server is unreachable from ReqCheck. Check the base URL, the server and the proxy."
+      "hint": "The model server is unreachable from Zoe. Check the base URL, the server and the proxy."
     },
     "unavailable": {
       "title": "The provider is temporarily unavailable",

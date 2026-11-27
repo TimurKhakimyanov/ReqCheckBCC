@@ -79,9 +79,9 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="ReqCheck API", version="1.0.0", lifespan=lifespan,
+        title="Zoe API", version="1.0.0", lifespan=lifespan,
         openapi_url="/api/openapi.json", docs_url="/api/docs", redoc_url=None,
-        description="HTTP API ReqCheck — агент проверки требований (ISO/IEC/IEEE 29148, IEEE 830). "
+        description="HTTP API Zoe — агент проверки требований (ISO/IEC/IEEE 29148, IEEE 830). "
                     "Авторизация: httpOnly cookie `session` после POST /api/auth/login.",
     )
     install_error_handlers(app)

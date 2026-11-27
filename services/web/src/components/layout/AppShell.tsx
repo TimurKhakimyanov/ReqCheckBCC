@@ -19,13 +19,27 @@ const NAV = [
   { to: '/settings', key: 'nav.settings' },
 ] as const
 
-/** Знак ReqCheck: квадрат с толстой рамкой, как в референсе. */
+/** Знак Zoe: пять кругов, два верхних левых соединены перемычкой. Цвет — currentColor. */
+export function LogoMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 100 100" aria-hidden className={className} fill="currentColor">
+      <circle cx="24" cy="22" r="18" />
+      <circle cx="52" cy="50" r="15" />
+      <circle cx="83" cy="19" r="14" />
+      <circle cx="21" cy="80" r="15" />
+      <circle cx="84" cy="83" r="9" />
+      <path d="M23.06 39.98Q33.86 42.26 37.02 50.79L52.79 35.02Q44.26 31.86 41.98 21.06Z" />
+    </svg>
+  )
+}
+
+/** Логотип Zoe: белый знак на чёрной плашке (как в фирменном знаке) и название. */
 export function Brand({ className }: { className?: string }) {
   const { t } = useTranslation()
   return (
     <span className={cn('flex items-center gap-2.5 text-base font-semibold tracking-tight', className)}>
-      <span aria-hidden className="inline-flex size-7 items-center justify-center rounded-[9px] bg-foreground">
-        <span className="size-2.5 rounded-[3px] border-2 border-background" />
+      <span aria-hidden className="inline-flex size-7 items-center justify-center rounded-[9px] bg-black ring-1 ring-white/15">
+        <LogoMark className="size-[17px] text-white" />
       </span>
       {t('app.name')}
     </span>
