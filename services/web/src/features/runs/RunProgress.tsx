@@ -36,9 +36,9 @@ export function RunProgress({ run }: { run: Run }) {
   const failed = stage === 'failed' || stage === 'cancelled'
   const currentIdx = PIPELINE_STAGES.indexOf(stage)
   // для упавшего прогона — последняя достигнутая стадия
-  const reachedIdx = failed
-    ? Math.max(0, ...events.filter((e) => !isTerminal(e.stage)).map((e) => PIPELINE_STAGES.indexOf(e.stage)))
-    : currentIdx
+  // (открыт из истории — событий нет, стадия сбоя неизвестна: не отмечаем ни одну)
+  const seen = events.filter((e) => !isTerminal(e.stage)).map((e) => PIPELINE_STAGES.indexOf(e.stage))
+  const reachedIdx = failed ? (seen.length ? Math.max(...seen) : -1) : currentIdx
   const log = dedupe(events)
 
   return (
