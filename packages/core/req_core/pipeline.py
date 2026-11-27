@@ -110,6 +110,23 @@ class Progress:
         self(self.stage, self.last, message)
 
 
+TITLE_LIMIT = 110
+
+
+def split_title(title: str, explanation: str) -> tuple[str, str]:
+    """Короткий заголовок дефекта. Если модель написала в заголовок объяснение — первая фраза идёт
+    в заголовок, а полный текст переносится в объяснение (ничего не теряется)."""
+    title = " ".join((title or explanation).split())
+    explanation = explanation or title
+    if len(title) <= TITLE_LIMIT:
+        return title, explanation
+    first = re.split(r"(?<=[.!?:;])\s+|\s+[—–]\s+", title, maxsplit=1)[0].rstrip(".:;")
+    short = first if 12 <= len(first) <= TITLE_LIMIT else shorten(first, TITLE_LIMIT)
+    if title not in explanation:
+        explanation = f"{title} {explanation}".strip() if explanation != title else title
+    return short, explanation
+
+
 def _fatal(e: BaseException) -> bool:
     """Ошибки, при которых продолжать бессмысленно (ключ, модель, доступ)."""
     return isinstance(e, LLMConfigError) or _status_of(e) in (401, 403, 404)
@@ -279,10 +296,10 @@ class Pipeline:
                 scope = FindingScope.SET
             if not it.title.strip() and not it.explanation.strip():
                 continue
+            title, explanation = split_title(it.title.strip(), it.explanation.strip())
             out.append(FindingDraft(
                 scope=scope, criterion=it.criterion, severity=it.severity,
-                title=shorten(it.title.strip() or it.explanation.strip(), 160),
-                explanation=it.explanation.strip() or it.title.strip(),
+                title=title, explanation=explanation,
                 requirement_ids=rids, suggestion=it.suggestion.strip() or None, source=FindingSource.LLM,
                 unverified_quotes=[q for q in it.quotes if q and q.strip()],
             ))

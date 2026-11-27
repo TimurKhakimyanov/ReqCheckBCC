@@ -191,3 +191,15 @@ def test_verify_pass_drops_and_regrades(sample_path):
     titles = {f.title: f for f in report.findings}
     assert "Не задан часовой пояс" not in titles
     assert titles["Критерий приёмки противоречит Ф-2"].severity == Severity.MAJOR
+
+
+def test_long_model_title_is_split_without_losing_text():
+    from req_core.pipeline import TITLE_LIMIT, split_title
+
+    long = ("«Проведённые покупки» — неопределённый статус: не сказано, что считать проведённой покупкой "
+            "(авторизованная, поставленная в оборот, со статусом posted), поэтому тестировщик не знает, что проверять.")
+    title, expl = split_title(long, "Короткое пояснение.")
+    assert len(title) <= TITLE_LIMIT and title.startswith("«Проведённые покупки»")
+    assert long in expl and expl.endswith("Короткое пояснение.")
+    assert split_title("Коротко", "Пояснение") == ("Коротко", "Пояснение")
+    assert split_title("", "Только пояснение") == ("Только пояснение", "Только пояснение")
