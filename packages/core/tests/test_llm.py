@@ -38,7 +38,7 @@ class StubLLM(BaseLLM):
         self.sleeps = []
         self.sleep = self.sleeps.append
 
-    def _call(self, system, messages, schema):
+    def _call(self, system, messages, schema, mode="prompt", max_tokens=None):
         self.prompts.append(messages[-1]["content"])
         r = self.replies.pop(0)
         if isinstance(r, Exception):

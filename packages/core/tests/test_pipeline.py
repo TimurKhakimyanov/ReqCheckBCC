@@ -191,3 +191,47 @@ def test_verify_pass_drops_and_regrades(sample_path):
     titles = {f.title: f for f in report.findings}
     assert "Не задан часовой пояс" not in titles
     assert titles["Критерий приёмки противоречит Ф-2"].severity == Severity.MAJOR
+
+
+def test_long_model_title_is_split_without_losing_text():
+    from req_core.pipeline import TITLE_LIMIT, split_title
+
+    long = ("«Проведённые покупки» — неопределённый статус: не сказано, что считать проведённой покупкой "
+            "(авторизованная, поставленная в оборот, со статусом posted), поэтому тестировщик не знает, что проверять.")
+    title, expl = split_title(long, "Короткое пояснение.")
+    assert len(title) <= TITLE_LIMIT and title.startswith("«Проведённые покупки» — неопределённый статус: не сказано") and title.endswith("…")
+    assert long in expl and expl.endswith("Короткое пояснение.")
+    assert split_title("Коротко", "Пояснение") == ("Коротко", "Пояснение")
+    assert split_title("", "Только пояснение") == ("Только пояснение", "Только пояснение")
+
+
+def test_checklist_prompt_sees_the_document(sample_path):
+    llm = FakeLLM()
+    run_pipeline(parse_document(sample_path), llm)
+    call = next(c for c in llm.calls if c.get("schema") == "ChecklistResult")
+    assert "<document>" in call["user"] and "Архитектура решения" in call["user"]
+
+
+def test_short_first_phrase_is_not_used_as_title():
+    from req_core.pipeline import TITLE_LIMIT, split_title
+
+    long = "«Переводы» — не определено, относятся ли к ним переводы между своими картами, пополнения и платежи по реквизитам"
+    title, _ = split_title(long, "")
+    assert title.startswith("«Переводы» — не определено") and len(title) <= TITLE_LIMIT
+
+
+def test_foreign_script_leaks_are_removed_from_model_text(sample_path):
+    llm = scripted()
+    llm.responses["ConclusionResult"] = {"rationale": "Нет ветки除了happy-path.", "top_fixes": ["Описать ветки除了успеха"]}
+    report = run_pipeline(parse_document(sample_path), llm)
+    assert report.conclusion.rationale == "Нет ветки happy-path."
+    assert report.conclusion.top_fixes == ["Описать ветки успеха"]
+
+
+def test_title_is_not_cut_at_status_code_period():
+    from req_core.pipeline import split_title
+
+    long = ("Требование 401 размещено в разделе «200. Successful — Created», что противоречит смыслу кода 401 "
+            "и вводит в заблуждение разработчика и тестировщика при реализации обработки ошибок авторизации")
+    title, _ = split_title(long, "")
+    assert "Successful" in title

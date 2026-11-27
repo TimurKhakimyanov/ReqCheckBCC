@@ -394,7 +394,8 @@ def rule_findings(text: str, sections: SectionIndex, reqs: list[ReqDraft]) -> li
             cells = [clean_inline(c) for c in split_row(r.text)]
             if TEMPLATE_CHOICE.search(r.text):
                 choice_spans.append(row_span(r))
-            if len(cells) >= 2 and cells[0] and any(PLACEHOLDER_CELL.search(c) for c in cells[1:] if c):
+            # только таблицы «поле — значение»: в широких таблицах прочерк — осмысленное «нет» (напр. DB field)
+            if len(cells) == 2 and cells[0] and (not cells[1] or PLACEHOLDER_CELL.search(cells[1])):
                 placeholders.append((cells[0], row_span(r)))
         if empty_rows:
             out.append(FindingDraft(

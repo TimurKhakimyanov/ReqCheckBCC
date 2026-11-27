@@ -77,3 +77,10 @@ def test_extract_checklist(sample_path):
     items = extract_checklist(text, SectionIndex(text))
     assert len(items) == 14
     assert items[0][0].startswith("Техническое требование зафиксировано")
+
+
+def test_dash_in_wide_table_is_not_an_unfilled_field(sample_path):
+    text = parse_document(sample_path).text
+    found = rule_findings(text, SectionIndex(text), [])
+    placeholder_titles = [f.title for f in found if f.title.startswith("Не заполнены поля")]
+    assert placeholder_titles and all("result" not in t and "message" not in t for t in placeholder_titles)

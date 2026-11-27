@@ -6,7 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from req_contracts import ProviderConfig, ProviderName, Report, RunStage
+from req_contracts import ProviderConfig, ProviderName, Report, RunStage, ValidationOptions
 
 import req_core
 from req_core import ChatMessage, answer_question, get_llm, list_models, render_report, validate_document
@@ -58,11 +58,10 @@ def test_exception_from_on_progress_aborts_pipeline(sample_path, monkeypatch):
     assert events[-1].stage == RunStage.CHECKING_REQUIREMENTS
 
 
-def test_cancel_with_parallel_batches(sample_path, monkeypatch):
-    monkeypatch.setenv("REQCHECK_CONCURRENCY", "3")
-    monkeypatch.setenv("REQCHECK_BATCH_SIZE", "2")
+def test_cancel_with_parallel_batches(sample_path):
     with pytest.raises(RunCancelled):
         run_pipeline(req_core.parse_document(sample_path), FakeLLM(),
+                     options=ValidationOptions(concurrency=3, batch_size=2),
                      on_progress=_cancel_after(RunStage.CHECKING_REQUIREMENTS, 1, []))
 
 
@@ -78,7 +77,7 @@ class AlwaysRateLimited(BaseLLM):
         self.attempts = 0
         self.sleep = lambda s: None
 
-    def _call(self, system, messages, schema):
+    def _call(self, system, messages, schema, mode="prompt", max_tokens=None):
         self.attempts += 1
         raise RateLimited("Please retry in 30s")
 
@@ -176,26 +175,25 @@ class FakeOpenAIServer:
 
 
 @pytest.fixture
-def oai_server(monkeypatch):
+def oai_server():
     srv = FakeOpenAIServer()
-    monkeypatch.setenv("OPENAI_COMPATIBLE_BASE_URL", srv.base_url)
     yield srv
     srv.close()
 
 
-def _compat(model="qwen3:8b", **kw):
-    return ProviderConfig(provider=ProviderName.OPENAI_COMPATIBLE, model=model, **kw)
+def _compat(srv, model="qwen3:8b", **kw):
+    return ProviderConfig(provider=ProviderName.OPENAI_COMPATIBLE, model=model, base_url=srv.base_url, **kw)
 
 
-def test_compatible_list_models_uses_base_url_from_env(oai_server):
-    assert list_models(_compat(model="-")) == ["llama3.1:8b", "qwen3:8b"]
+def test_compatible_list_models_uses_base_url_from_config(oai_server):
+    assert list_models(_compat(oai_server, model="-")) == ["llama3.1:8b", "qwen3:8b"]
     req = oai_server.requests[-1]
     assert req["path"] == "/v1/models"
     assert req["auth"] == "Bearer ollama"  # пустой ключ → «ollama»
 
 
 def test_compatible_complete_like_provider_test_button(oai_server):
-    cfg = _compat().model_copy(update={"timeout_s": 30.0, "max_output_tokens": 16})
+    cfg = _compat(oai_server).model_copy(update={"timeout_s": 30.0, "max_output_tokens": 16})
     assert get_llm(cfg).complete("Answer with one word.", "ping") == "pong"
     body = oai_server.requests[-1]["body"]
     assert body["model"] == "qwen3:8b" and body["max_tokens"] == 16 and body["temperature"] == 0.0
@@ -206,14 +204,14 @@ def test_compatible_complete_like_provider_test_button(oai_server):
 
 def test_compatible_temperature_rejected_is_retried_without_it(oai_server):
     oai_server.reject_temperature = True
-    assert get_llm(_compat()).complete("s", "ping") == "pong"
+    assert get_llm(_compat(oai_server)).complete("s", "ping") == "pong"
     assert "temperature" not in oai_server.requests[-1]["body"]
 
 
 def test_compatible_model_autoselect_and_json(oai_server):
     from req_core.schemas import ConclusionResult
 
-    client = get_llm(_compat(model=""))
+    client = get_llm(_compat(oai_server, model=""))
     assert client.model in {"qwen3:8b", "llama3.1:8b"}
     res = client.complete_json("s", "u", ConclusionResult)
     assert res.top_fixes == ["D-001"]
@@ -224,7 +222,7 @@ def test_compatible_model_autoselect_and_json(oai_server):
 def test_answer_question_streams_with_chat_history(oai_server, sample_report):
     history = [ChatMessage(role="user", content="Что с R-002?"),
                ChatMessage(role="assistant", content="Есть противоречие D-001.")]
-    tokens = list(answer_question(sample_report, history, "Как исправить?", _compat(), ["Глоссарий"]))
+    tokens = list(answer_question(sample_report, history, "Как исправить?", _compat(oai_server), ["Глоссарий"]))
     assert "".join(tokens) == "pong" and len(tokens) == 2
     body = oai_server.requests[-1]["body"]
     assert body["stream"] is True

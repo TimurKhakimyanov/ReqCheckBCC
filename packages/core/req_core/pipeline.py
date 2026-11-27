@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import re
 import threading
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -66,20 +67,16 @@ log = logging.getLogger("req_core.pipeline")
 SEVERITY_RANK = {Severity.CRITICAL: 0, Severity.MAJOR: 1, Severity.MINOR: 2}
 
 
-def _env_int(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.environ.get(name, default)))
-    except ValueError:
-        return default
-
-
 class Settings:
-    def __init__(self) -> None:
-        self.context_chars = _env_int("REQCHECK_CONTEXT_CHARS", 150_000)
-        self.segment_chunk_chars = _env_int("REQCHECK_SEGMENT_CHUNK_CHARS", 40_000)
-        self.batch_size = _env_int("REQCHECK_BATCH_SIZE", 6)
-        self.concurrency = _env_int("REQCHECK_CONCURRENCY", 1)
-        self.critic_batch = _env_int("REQCHECK_CRITIC_BATCH", 30)
+    """Параметры прогона — только из ValidationOptions (окружение ядро не читает)."""
+
+    context_chars = 150_000  # текст документа в промпте
+    segment_chunk_chars = 40_000  # фрагмент документа для нарезки
+    critic_batch = 30
+
+    def __init__(self, options: ValidationOptions) -> None:
+        self.batch_size = max(1, options.batch_size)
+        self.concurrency = max(1, options.concurrency)
 
 
 class Progress:
@@ -113,6 +110,51 @@ class Progress:
         self(self.stage, self.last, message)
 
 
+FOREIGN_SCRIPT = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]+")
+
+
+def _clean(s: str | None) -> str | None:
+    if not s:
+        return s
+    return re.sub(r"[ \t]{2,}", " ", FOREIGN_SCRIPT.sub(" ", s)).strip()
+
+
+def strip_foreign_script(report: Report) -> Report:
+    """Убирает иероглифы, которые модель (напр. китайская) вставляет в русский текст. Цитаты не трогаем —
+    они дословно из документа; вызывается, только если в самом документе таких символов нет."""
+    for f in report.findings:
+        f.title, f.explanation, f.suggestion = _clean(f.title), _clean(f.explanation), _clean(f.suggestion)
+    for r in report.requirements:
+        r.summary = _clean(r.summary)
+    for a in report.requirement_assessments:
+        for c in a.checks:
+            c.comment = _clean(c.comment)
+    for c in report.set_assessment.checks:
+        c.comment = _clean(c.comment)
+    for item in report.checklist:
+        item.comment = _clean(item.comment)
+    report.conclusion.rationale = _clean(report.conclusion.rationale)
+    report.conclusion.top_fixes = [_clean(x) for x in report.conclusion.top_fixes]
+    return report
+
+
+TITLE_LIMIT = 110
+
+
+def split_title(title: str, explanation: str) -> tuple[str, str]:
+    """Короткий заголовок дефекта. Если модель написала в заголовок объяснение — первая фраза идёт
+    в заголовок, а полный текст переносится в объяснение (ничего не теряется)."""
+    title = " ".join((title or explanation).split())
+    explanation = explanation or title
+    if len(title) <= TITLE_LIMIT:
+        return title, explanation
+    # обрезка по слову: деление по «первой фразе» рвёт «200. Created», «Content-Type: …» и теряет смысл
+    short = shorten(title, TITLE_LIMIT)
+    if title not in explanation:
+        explanation = f"{title} {explanation}".strip() if explanation != title else title
+    return short, explanation
+
+
 def _fatal(e: BaseException) -> bool:
     """Ошибки, при которых продолжать бессмысленно (ключ, модель, доступ)."""
     return isinstance(e, LLMConfigError) or _status_of(e) in (401, 403, 404)
@@ -128,7 +170,7 @@ class Pipeline:
         self.progress = progress
         self.provider = provider
         self.model = model
-        self.s = Settings()
+        self.s = Settings(options)
         self.sections = SectionIndex(self.text)
         self.locator = QuoteLocator(self.text)
         self.system = prompts.system_prompt(options.knowledge_snippets)
@@ -154,7 +196,8 @@ class Pipeline:
             if _fatal(e) or (self.llm_ok == 0 and what == "нарезка" and not isinstance(e, LLMError)):
                 raise
             log.warning("Шаг «%s» не выполнен моделью: %s", what, e)
-            self.warnings.append(f"{what}: {shorten(str(e), 160)}")
+            # адреса серверов в отчёт не попадают
+            self.warnings.append(f"{what}: {shorten(re.sub(r'https?://\S+', '<url>', str(e)), 160)}")
             return None
 
     # ------------------------------------------------------------ нарезка
@@ -281,10 +324,10 @@ class Pipeline:
                 scope = FindingScope.SET
             if not it.title.strip() and not it.explanation.strip():
                 continue
+            title, explanation = split_title(it.title.strip(), it.explanation.strip())
             out.append(FindingDraft(
                 scope=scope, criterion=it.criterion, severity=it.severity,
-                title=shorten(it.title.strip() or it.explanation.strip(), 160),
-                explanation=it.explanation.strip() or it.title.strip(),
+                title=title, explanation=explanation,
                 requirement_ids=rids, suggestion=it.suggestion.strip() or None, source=FindingSource.LLM,
                 unverified_quotes=[q for q in it.quotes if q and q.strip()],
             ))
@@ -341,18 +384,25 @@ class Pipeline:
                         c for c in item.not_applicable if c in REQUIREMENT_CRITERIA)
         return issues, na
 
+    def _set_review_body(self):
+        """На проверке набора — cfg.extra_body_set_review (напр. включить рассуждения для поиска противоречий)."""
+        body = getattr(getattr(self.client, "cfg", None), "extra_body_set_review", None)
+        use = getattr(self.client, "use_extra_body", None)
+        return use(body) if use and body is not None else contextlib.nullcontext()
+
     def check_set(self, drafts: list[ReqDraft], known: list[FindingDraft], ids: set[str]
                   ) -> tuple[list[FindingDraft], dict[Criterion, Any]]:
         doc = prompts.doc_block(self.text, self.s.context_chars)
         reqs = self.reqs_list(drafts)
-        self.progress(RunStage.CHECKING_SET, 0.72, "Проверка согласованности набора")
-        cons = self.ask(prompts.SET_CONSISTENCY_TASK.format(
-            known=self.known_block([f for f in known if f.scope == FindingScope.SET]), reqs=reqs, doc=doc),
-            SetConsistencyResult, "проверка согласованности набора")
-        self.progress(RunStage.CHECKING_SET, 0.8, "Проверка полноты набора")
-        rev = self.ask(prompts.SET_REVIEW_TASK.format(
-            criteria=prompts.set_criteria_block(), known=self.known_block(known), reqs=reqs, doc=doc),
-            SetReviewResult, "проверка полноты набора")
+        with self._set_review_body():
+            self.progress(RunStage.CHECKING_SET, 0.72, "Проверка согласованности набора")
+            cons = self.ask(prompts.SET_CONSISTENCY_TASK.format(
+                known=self.known_block([f for f in known if f.scope == FindingScope.SET]), reqs=reqs, doc=doc),
+                SetConsistencyResult, "проверка согласованности набора")
+            self.progress(RunStage.CHECKING_SET, 0.8, "Проверка полноты набора")
+            rev = self.ask(prompts.SET_REVIEW_TASK.format(
+                criteria=prompts.set_criteria_block(), known=self.known_block(known), reqs=reqs, doc=doc),
+                SetReviewResult, "проверка полноты набора")
         out: list[FindingDraft] = []
         checks: dict[Criterion, Any] = {}
         if cons:
@@ -523,6 +573,8 @@ class Pipeline:
             set_assessment=set_assessment, findings=report_findings, checklist=checklist,
             summary=summary, conclusion=conclusion, usage=usage,
         )
+        if not FOREIGN_SCRIPT.search(self.doc.text):
+            report = strip_foreign_script(report)
         self.progress(RunStage.DONE, 1.0, f"Готово: требований {len(requirements)}, дефектов {len(findings)}")
         return report
 
@@ -582,7 +634,8 @@ class Pipeline:
         self.progress(RunStage.VERIFYING, 0.92, "Заполнение чек-листа ревью")
         res = self.ask(prompts.CHECKLIST_TASK.format(
             items="\n".join(f"{i}. {q}" for i, (q, _) in enumerate(items, 1)),
-            findings=self._findings_brief(findings), reqs=self.reqs_list(drafts)),
+            findings=self._findings_brief(findings), reqs=self.reqs_list(drafts),
+            doc=prompts.doc_block(self.text, self.s.context_chars)),
             ChecklistResult, "чек-лист")
         answers = {it.index: it for it in (res.items if res else [])}
         valid = {f.id for f in findings}

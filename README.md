@@ -14,41 +14,55 @@
 Агент принимает путь к документу требований (PDF, DOCX, MD, TXT) и путь к файлу отчёта. Нужен только Docker.
 
 **1. Ключ LLM.** Бесплатный ключ Gemini: [aistudio.google.com](https://aistudio.google.com/) → *Get API key* →
-*Create API key*. Для бесплатного тарифа достаточно.
+*Create API key*. Для бесплатного тарифа достаточно. Для локальной модели (vLLM, Ollama) ключ не нужен.
 
-**2. Куда положить.** В файл `.env` в корне репозитория (в git не попадает):
+**2. Куда положить.** Никуда: ключ передаётся при запуске — переменной окружения (`-e GEMINI_API_KEY=...`)
+или флагом `--api-key`. Файл `.env` для LLM не используется (в нём только пароли инфраструктуры; он нужен
+docker compose, поэтому один раз выполните `Copy-Item .env.example .env`). В веб-интерфейсе ключи и параметры
+ИИ задаются в админке.
 
-```powershell
-Copy-Item .env.example .env
-```
-
-В `.env` заполните `GEMINI_API_KEY=...`. Другие провайдеры: `LLM_PROVIDER=openai` + `OPENAI_API_KEY`,
-`LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`, локальная модель — `LLM_PROVIDER=openai_compatible` +
-`OPENAI_COMPATIBLE_BASE_URL` (Ollama, vLLM) + `OPENAI_COMPATIBLE_MODEL`.
-
-**3. Модель.** `LLM_MODEL` в `.env`. Если пусто — агент берёт первую доступную ключу модель из списка
-рекомендованных (Gemini: `gemini-4-hydrogen` → `gemini-3.8-flash` → `gemini-3.6-flash` → …).
-Фактическая модель всегда записывается в паспорт отчёта. Temperature 0, структурированный JSON-вывод.
-
-**4. Запуск одной командой.** Положите документ в каталог `data/` и выполните:
+**3. Запуск одной командой.** Положите документ в каталог `data/` и выполните:
 
 ```powershell
-docker compose -p reqcheck-core --profile cli run --rm --build cli /data/requirements.pdf /data/report.md
+docker compose -p reqcheck-core --profile cli run --rm --build -e GEMINI_API_KEY=ваш-ключ cli /data/requirements.pdf /data/report.md
 ```
+
+Другие провайдеры:
+
+```powershell
+docker compose -p reqcheck-core --profile cli run --rm -e ANTHROPIC_API_KEY=ваш-ключ cli /data/requirements.pdf /data/report.md --provider anthropic --model claude-opus-5-5
+```
+
+Локальная модель на vLLM / Ollama (ключ не нужен). Для моделей с рассуждениями рассуждения выключаются на
+проверке требований и включаются на поиске противоречий в наборе (`--extra-body`, `--extra-body-set-review`);
+с рассуждениями один запрос проверки набора идёт несколько минут, поэтому `--timeout 900`. На примере из
+`samples/` (42 требования) прогон на `mimo-v2.6-flash` занимает около 8 минут:
+
+```powershell
+docker compose -p reqcheck-core --profile cli run --rm cli /data/requirements.md /data/report.md --provider openai_compatible --base-url http://vllm.example.local:8000/v1 --model mimo-v2.6-flash --concurrency 4 --max-tokens 48000 --timeout 900 --extra-body '{\"chat_template_kwargs\":{\"enable_thinking\":false}}' --extra-body-set-review '{\"chat_template_kwargs\":{\"enable_thinking\":true}}'
+```
+
+(`OPENAI_API_KEY` + `--provider openai` — аналогично.)
+
+**4. Модель.** `--model <id>`. Если не указана — агент берёт первую доступную ключу модель из списка
+рекомендованных (Gemini: `gemini-4-hydrogen` → `gemini-3.8-flash` → …; Anthropic: `claude-opus-5-5` → …).
+Фактическая модель всегда записывается в паспорт отчёта. Temperature 0 (где модель её принимает),
+структурированный JSON-вывод: нативная JSON Schema провайдера → инструмент → схема в промпте с проверкой.
 
 **5. Отчёт** ляжет в `data/report.md`. Формат определяется по расширению (`.md`, `.json`, `.docx`, `.pdf`);
 несколько форматов сразу — `--also json,docx,pdf`. Прогресс выводится в терминал.
 
-Полезные флаги: `--provider gemini|openai|anthropic|openai_compatible`, `--model <id>`, `--verify` (второй
-проход-критик перепроверяет дефекты), `--no-split` (не выделять подтребования), `--help`.
+Флаги: `--provider gemini|openai|anthropic|openai_compatible`, `--model`, `--api-key`, `--base-url`,
+`--verify` (второй проход-критик перепроверяет дефекты), `--no-split` (не выделять подтребования),
+`--min-interval` (пауза между запросами, с), `--max-attempts` (повторы при 429/5xx), `--max-output-tokens`,
+`--batch-size`, `--concurrency`, `--help`. Если бесплатный Gemini отвечает `429`, агент сам ждёт и повторяет
+запрос; при частых ограничениях добавьте `--min-interval 6`.
+
 Версия агента в паспорте отчёта — из `git describe` (в Docker — из `AGENT_VERSION` при сборке):
 
 ```powershell
-$env:AGENT_VERSION = git describe --always --dirty; docker compose -p reqcheck-core --profile cli run --rm --build cli /data/requirements.pdf /data/report.md
+$env:AGENT_VERSION = git describe --always --dirty; docker compose -p reqcheck-core --profile cli run --rm --build -e GEMINI_API_KEY=ваш-ключ cli /data/requirements.pdf /data/report.md
 ```
-
-Если бесплатный Gemini отвечает `429`, агент сам ждёт и повторяет запрос; при частых ограничениях задайте
-`LLM_MIN_INTERVAL_S=6` в `.env`.
 
 ### Как агент проверяет
 
