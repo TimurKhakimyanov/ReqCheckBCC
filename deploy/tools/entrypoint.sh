@@ -3,6 +3,8 @@
 set -euo pipefail
 
 # rclone настраивается только переменными окружения — конфиг-файл не нужен.
+: > /tmp/rclone.conf
+export RCLONE_CONFIG=/tmp/rclone.conf
 export RCLONE_CONFIG_S3_TYPE=s3
 export RCLONE_CONFIG_S3_PROVIDER=SeaweedFS
 export RCLONE_CONFIG_S3_ENDPOINT="${S3_ENDPOINT_URL:-http://seaweedfs:8333}"
