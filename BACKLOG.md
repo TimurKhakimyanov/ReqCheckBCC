@@ -52,5 +52,20 @@
 
 ## Инфраструктура
 <!-- сессия «Инфраструктура» -->
-- [ ] Офлайн-комплект: `docker save` всех образов + скрипт загрузки на сервер без интернета
+- [ ] Офлайн-комплект: `docker save` всех образов + скрипт `docker load` и запуска на сервере без интернета
 - [ ] Helm-чарт для Kubernetes/OpenShift
+- [ ] CI/CD: сборка, `docker compose config`, `test-infra` и тесты сервисов в пайплайне; сканирование образов (Trivy)
+- [ ] Лицензия Redis: с версии 7.4 Redis не open source (RSALv2/SSPLv1), с 8.0 добавлена AGPLv3. Для банка
+  AGPL/SSPL могут быть неприемлемы юридически. Сейчас стоит `redis:8.10.3-alpine` по решению пользователя;
+  альтернатива без изменений кода — Valkey (BSD-3, форк Redis 7.2, `valkey/valkey:9.2-alpine`, тот же протокол
+  и `redis-cli`). Решить с юристами до промышленной эксплуатации
+- [ ] Журналы на ELK/OpenSearch вместо Loki (если в банке это стандарт); сейчас Loki + Alloy
+- [ ] Alertmanager и доставка оповещений (почта / Telegram / Mattermost); сейчас правила видны только в Prometheus/Grafana
+- [ ] Бэкап вне сервера: выгрузка `./backups` в внешний S3 / NFS, шифрование (restic/age), проверка восстановления по расписанию
+- [ ] Высокая доступность: Postgres с репликой (Patroni / CloudNativePG), SeaweedFS с несколькими volume-серверами и репликацией, Qdrant-кластер
+- [ ] Секреты из Vault / Docker secrets вместо `.env`
+- [ ] TLS внутри docker-сети (mTLS между сервисами) и `internal: true` для сети хранилищ (выход в интернет только у worker/api)
+- [ ] Сеть `backend` разделить: хранилища в отдельной internal-сети, мониторинг — в своей
+- [ ] cAdvisor требует `privileged` и доступа к `/var/lib/docker`; на ужесточённых хостах заменить на node-exporter + метрики Docker Engine
+- [ ] Healthcheck для Loki (образ distroless без shell) — через внешний blackbox-exporter
+- [ ] Выбор модели для `offline`/`gpu` (качество проверки требований на русском, память): кандидаты Qwen3, Gemma 3, Llama; при росте нагрузки — vLLM вместо Ollama

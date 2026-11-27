@@ -62,3 +62,6 @@ coverage/
 # Runtime data
 reports/
 *.log
+
+# Бэкапы (профиль backup)
+backups/
