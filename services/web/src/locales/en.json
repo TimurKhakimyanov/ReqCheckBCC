@@ -321,7 +321,7 @@
   },
   "settings": {
     "title": "Settings",
-    "subtitle": "LLM provider keys, default model and your account",
+    "subtitle": "LLM providers, AI parameters and your account",
     "providers": "LLM providers",
     "account": "Account",
     "noKey": "No key",
@@ -364,7 +364,12 @@
     "modelsLive_other": "The provider returned {{count}} models",
     "modelsSaved_one": "{{count}} model available",
     "modelsSaved_other": "{{count}} models available",
-    "modelsNone": "Paste a key — the model list loads automatically"
+    "modelsNone": "Paste a key — the model list loads automatically",
+    "tabs": {
+      "providers": "Providers",
+      "params": "Parameters",
+      "account": "Account"
+    }
   },
   "usage": {
     "title": "Token usage",
@@ -547,5 +552,70 @@
       "title": "Error while calling the model",
       "hint": "See the details below. If it persists, pass them to an administrator."
     }
+  },
+  "params": {
+    "defaults": "Defaults",
+    "defaultsHint": "Used for new runs and chat when nothing else is chosen.",
+    "defaultProvider": "Default provider",
+    "autoProvider": "Automatic — first configured",
+    "defaultModel": "Default model",
+    "pacing": "Call speed and reliability",
+    "pacingHint": "Tune to the provider plan: free keys are rate-limited, local models are slow.",
+    "presets": "Quick presets",
+    "preset": {
+      "free_gemini": "Free Gemini",
+      "free_geminiHint": "6 s pause, 1 worker, 8 attempts — to stay clear of 429",
+      "paid_api": "Paid API",
+      "paid_apiHint": "No pause, 4 workers, batches of 8 — fast",
+      "local": "Local model",
+      "localHint": "1 worker, batches of 3, 600 s timeout — for a single GPU"
+    },
+    "resetTo": "Reset to default: {{value}}",
+    "revert": "Discard changes",
+    "min_interval_s": {
+      "label": "Pause between calls",
+      "unit": "s",
+      "hint": "Free Gemini and 429 “Too many requests” errors — set 5–10 s. Paid plans and local models — 0."
+    },
+    "concurrency": {
+      "label": "Parallel requests",
+      "unit": "",
+      "hint": "Paid APIs — 3–4, runs get several times faster. Free keys and a local model on one GPU — 1, otherwise 429 or queueing."
+    },
+    "max_attempts": {
+      "label": "Attempts per call",
+      "unit": "",
+      "hint": "Retries on 429, 5xx and network drops. 4–6 is usually enough; 8 on free tiers. More means longer hangs on real failures."
+    },
+    "batch_size": {
+      "label": "Requirements per request",
+      "unit": "",
+      "hint": "Bigger — fewer and cheaper calls, but weak models break JSON more often. On format or context errors drop to 3–4."
+    },
+    "request_timeout_s": {
+      "label": "Request timeout",
+      "unit": "s",
+      "hint": "How long to wait for one model answer. Local and reasoning models — 300–600 s."
+    },
+    "run_timeout_s": {
+      "label": "Whole run timeout",
+      "unit": "s",
+      "hint": "Runs longer than this stop with an error. Large documents on a slow model — 3600 s."
+    },
+    "embeddings": "Embeddings (search and knowledge base)",
+    "embeddingsHint": "The model that turns text into vectors for semantic search over runs and the knowledge base.",
+    "embProvider": "Embeddings provider",
+    "embModel": "Embeddings model",
+    "embKey": "Embeddings key",
+    "emb": {
+      "local": "Local (in perimeter)",
+      "localHint": "Works offline, data never leaves. Recommended for a bank perimeter.",
+      "gemini": "Google Gemini",
+      "geminiHint": "Better on long texts, but texts are sent to Google.",
+      "openai": "OpenAI",
+      "openaiHint": "Paid, texts are sent to OpenAI."
+    },
+    "reindexWarning": "After changing the embeddings model the knowledge base and run history are re-indexed — search may be incomplete for a few minutes.",
+    "range": "Allowed {{min}} to {{max}}"
   }
 }

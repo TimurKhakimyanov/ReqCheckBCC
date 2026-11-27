@@ -91,6 +91,56 @@ export function isProviderConfigured(p: Pick<ProviderSettings, 'provider' | 'has
   return p.provider === 'openai_compatible' ? !!p.base_url : p.has_key
 }
 
+export type EmbeddingsProvider = 'local' | 'gemini' | 'openai'
+export const EMBEDDINGS_PROVIDERS: EmbeddingsProvider[] = ['local', 'gemini', 'openai']
+
+/** Параметры ИИ из админки (GET/PUT /settings). Числа — те же поля, что в ProviderConfig / ValidationOptions ядра. */
+export interface AppSettings {
+  default_provider: ProviderId | null
+  default_model: string | null
+  /** Общий лимит на прогон, с */
+  run_timeout_s: number
+  /** Таймаут одного запроса к модели (ProviderConfig.timeout_s), с */
+  request_timeout_s: number
+  /** Пауза между вызовами (ProviderConfig.min_interval_s), с */
+  min_interval_s: number
+  /** Попыток на вызов при 429/5xx/сети (ProviderConfig.max_attempts) */
+  max_attempts: number
+  /** Требований в одном запросе (ValidationOptions.batch_size) */
+  batch_size: number
+  /** Параллельных запросов (ValidationOptions.concurrency) */
+  concurrency: number
+  embeddings: {
+    provider: EmbeddingsProvider
+    model: string
+    has_key: boolean
+    key_hint: string | null
+  }
+  updated_at?: string | null
+}
+
+export type AppSettingsUpdate = Partial<Omit<AppSettings, 'embeddings' | 'updated_at'>> & {
+  embeddings?: { provider?: EmbeddingsProvider; model?: string; /** "" — удалить ключ */ api_key?: string }
+}
+
+export type NumericSetting = 'run_timeout_s' | 'request_timeout_s' | 'min_interval_s' | 'max_attempts' | 'batch_size' | 'concurrency'
+
+/** Границы и значения по умолчанию — для формы и моков. Сервер проверяет сам (422 с errors). */
+export const SETTING_LIMITS: Record<NumericSetting, { min: number; max: number; step: number; default: number }> = {
+  run_timeout_s: { min: 60, max: 14400, step: 60, default: 1800 },
+  request_timeout_s: { min: 10, max: 1800, step: 10, default: 180 },
+  min_interval_s: { min: 0, max: 120, step: 0.5, default: 0 },
+  max_attempts: { min: 1, max: 20, step: 1, default: 6 },
+  batch_size: { min: 1, max: 50, step: 1, default: 6 },
+  concurrency: { min: 1, max: 16, step: 1, default: 1 },
+}
+
+export const EMBEDDING_MODELS: Record<EmbeddingsProvider, string[]> = {
+  local: ['intfloat/multilingual-e5-small', 'intfloat/multilingual-e5-base'],
+  gemini: ['gemini-embedding-001', 'text-embedding-004'],
+  openai: ['text-embedding-3-small', 'text-embedding-3-large'],
+}
+
 export type DocumentFormat = 'pdf' | 'docx' | 'md' | 'txt'
 
 export interface RunShort {

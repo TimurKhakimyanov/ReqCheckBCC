@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { PIPELINE_STAGES, PROVIDERS, REVIEW_STATUSES } from '@/api/types'
+import { EMBEDDINGS_PROVIDERS, PIPELINE_STAGES, PROVIDERS, REVIEW_STATUSES, SETTING_LIMITS } from '@/api/types'
 import { PROVIDER_ERROR_KINDS } from '@/features/errors/providerError'
 import { ALL_CRITERIA, SEVERITIES } from '@/shared/criteria'
 import i18n, { languages, resources } from './index'
@@ -64,6 +64,10 @@ describe('i18n', () => {
       ...['verify_pass', 'split_compound', 'fill_checklist'].flatMap((o) => [`launch.opt.${o}`, `launch.opt.${o}Hint`]),
       ...['upload.badFormat', 'upload.tooLarge'],
       ...PROVIDER_ERROR_KINDS.flatMap((k) => [`providerError.${k}.title`, `providerError.${k}.hint`]),
+      ...Object.keys(SETTING_LIMITS).flatMap((k) => [`params.${k}.label`, `params.${k}.unit`, `params.${k}.hint`]),
+      ...EMBEDDINGS_PROVIDERS.flatMap((p) => [`params.emb.${p}`, `params.emb.${p}Hint`]),
+      ...['free_gemini', 'paid_api', 'local'].flatMap((p) => [`params.preset.${p}`, `params.preset.${p}Hint`]),
+      ...['providers', 'params', 'account'].map((tab) => `settings.tabs.${tab}`),
     ]
     for (const lng of ['ru', 'en']) {
       const keys = keysOf(lng)

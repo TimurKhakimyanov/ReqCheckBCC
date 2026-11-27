@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { useMe } from '@/app/auth'
@@ -9,9 +10,11 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input, Label, NativeSelect } from '@/components/ui/input'
 import { ErrorNote, PageHeader, Skeleton, Spinner } from '@/components/ui/misc'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useProviders } from '@/features/runs/LaunchRunDialog'
 import { languages } from '@/i18n'
 import { useTheme, type ThemeMode } from '@/theme/theme'
+import { ParamsTab } from './ParamsTab'
 import { ProviderCard } from './ProviderCard'
 
 function PasswordCard() {
@@ -106,24 +109,53 @@ function ProfileCard() {
   )
 }
 
+const TABS = ['providers', 'params', 'account'] as const
+type SettingsTab = (typeof TABS)[number]
+
 export function SettingsPage() {
   const { t } = useTranslation()
   const providers = useProviders()
+  const [params, setParams] = useSearchParams()
+  const tab = (TABS.includes(params.get('tab') as SettingsTab) ? params.get('tab') : 'providers') as SettingsTab
+  const setTab = (v: string) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p)
+        if (v === 'providers') n.delete('tab')
+        else n.set('tab', v)
+        return n
+      },
+      { replace: true },
+    )
   return (
     <>
       <PageHeader title={t('settings.title')} description={t('settings.subtitle')} />
-      <h2 className="mb-3 text-lg font-semibold">{t('settings.providers')}</h2>
-      {providers.error && <ErrorNote error={providers.error} />}
-      <div className="grid gap-4 md:grid-cols-2">
-        {providers.isPending
-          ? [0, 1].map((i) => <Skeleton key={i} className="h-72" />)
-          : providers.data?.map((p) => <ProviderCard key={`${p.provider}-${p.updated_at}`} p={p} />)}
-      </div>
-      <h2 className="mt-8 mb-3 text-lg font-semibold">{t('settings.account')}</h2>
-      <div className="grid gap-4 md:grid-cols-2">
-        <ProfileCard />
-        <PasswordCard />
-      </div>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="mb-5">
+          {TABS.map((v) => (
+            <TabsTrigger key={v} value={v}>
+              {t(`settings.tabs.${v}`)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <TabsContent value="providers">
+          {providers.error && <ErrorNote error={providers.error} />}
+          <div className="grid gap-4 md:grid-cols-2">
+            {providers.isPending
+              ? [0, 1].map((i) => <Skeleton key={i} className="h-72" />)
+              : providers.data?.map((p) => <ProviderCard key={`${p.provider}-${p.updated_at}`} p={p} />)}
+          </div>
+        </TabsContent>
+        <TabsContent value="params">
+          <ParamsTab />
+        </TabsContent>
+        <TabsContent value="account">
+          <div className="grid gap-4 md:grid-cols-2">
+            <ProfileCard />
+            <PasswordCard />
+          </div>
+        </TabsContent>
+      </Tabs>
     </>
   )
 }

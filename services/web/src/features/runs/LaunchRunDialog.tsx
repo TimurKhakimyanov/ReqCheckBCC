@@ -25,6 +25,10 @@ export function useProviders() {
   return useQuery({ queryKey: ['providers'], queryFn: api.providers })
 }
 
+export function useAppSettings() {
+  return useQuery({ queryKey: ['settings'], queryFn: api.settings, staleTime: 60_000, retry: false })
+}
+
 export function useModels(provider?: ProviderId) {
   return useQuery({
     queryKey: ['models', provider],
@@ -47,6 +51,7 @@ export function LaunchRunDialog({
   const qc = useQueryClient()
   const navigate = useNavigate()
   const providers = useProviders()
+  const settings = useAppSettings()
   const last = useMemo(readLast, [])
 
   const usable = (providers.data ?? []).filter((p) => p.enabled)
@@ -54,15 +59,16 @@ export function LaunchRunDialog({
   const [model, setModel] = useState<string>(last.model ?? '')
   const [options, setOptions] = useState<Required<ValidationOptions>>({ ...DEFAULT_OPTIONS, ...last.options })
 
-  // Провайдер по умолчанию: последний использованный, иначе первый с ключом.
+  // Провайдер по умолчанию: последний использованный, иначе из параметров ИИ, иначе первый настроенный.
   useEffect(() => {
-    if (!providers.data) return
+    if (!providers.data || settings.isPending) return
     if (provider && usable.some((p) => p.provider === provider)) return
-    const pick = usable.find(isProviderConfigured) ?? usable[0]
+    const fromSettings = usable.find((p) => p.provider === settings.data?.default_provider && isProviderConfigured(p))
+    const pick = fromSettings ?? usable.find(isProviderConfigured) ?? usable[0]
     setProvider(pick?.provider)
-    setModel(pick?.default_model ?? '')
+    setModel((fromSettings && settings.data?.default_model) || pick?.default_model || '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providers.data])
+  }, [providers.data, settings.isPending])
 
   const models = useModels(provider)
   const current = usable.find((p) => p.provider === provider)

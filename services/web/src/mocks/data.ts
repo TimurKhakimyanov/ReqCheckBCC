@@ -1,6 +1,7 @@
 // Состояние мок-бэкенда в памяти. Основа — пример отчёта из общего контракта (sample_report.json).
 import sampleJson from '@contracts/fixtures/sample_report.json'
 import type {
+  AppSettings,
   AuditEntry,
   ChatMessage,
   DocumentItem,
@@ -65,6 +66,7 @@ export interface Db {
   knowledge: (KnowledgeItem & { _readyAt?: number })[]
   audit: AuditEntry[]
   auditSeq: number
+  settings: AppSettings & { _embeddingsKey?: string }
 }
 
 const SESSION_KEY = 'reqcheck.mock.session'
@@ -169,6 +171,18 @@ function seed(): Db {
       { id: 1, ts: ago(240), actor: 'admin', action: 'document.upload', target: docId, details: { name: doc.name } },
     ],
     auditSeq: 4,
+    settings: {
+      default_provider: 'gemini',
+      default_model: 'gemini-2.5-flash',
+      run_timeout_s: 1800,
+      request_timeout_s: 180,
+      min_interval_s: 0,
+      max_attempts: 6,
+      batch_size: 6,
+      concurrency: 1,
+      embeddings: { provider: 'local', model: 'intfloat/multilingual-e5-small', has_key: false, key_hint: null },
+      updated_at: ago(300),
+    },
   }
 }
 
