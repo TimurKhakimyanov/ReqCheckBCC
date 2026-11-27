@@ -15,6 +15,10 @@ describe('Agents page', () => {
       expect(outputsOf(src)).toContain(a.id)
     }))
     expect(outputsOf('verifier')).toEqual(['merger'])
+    // база знаний — только агентам из KB_ROLES ядра: нарезчик её не получает
+    expect(outputsOf('knowledge')).not.toContain('extractor')
+    expect(outputsOf('knowledge')).toContain('inspector')
+    expect(outputsOf('planner')).toEqual(expect.arrayContaining(['inspector', 'logic', 'security']))
   })
 
   it('shows the pipeline and details of the picked agent', async () => {
@@ -27,9 +31,9 @@ describe('Agents page', () => {
     await user.click(within(scheme).getByRole('button', { name: /Верификатор/ }))
     const details = screen.getByRole('article')
     expect(within(details).getByRole('heading', { name: 'Верификатор' })).toBeInTheDocument()
-    expect(within(details).getByText(/пытается опровергнуть каждый дефект/)).toBeInTheDocument()
-    // связи: получает от проверки цитат и базы знаний, передаёт слиянию дублей
-    expect(within(details).getByRole('button', { name: 'Проверка цитат' })).toBeInTheDocument()
+    expect(within(details).getByText(/пытается опровергнуть каждое замечание/)).toBeInTheDocument()
+    // связи: получает от контроля достоверности и базы знаний, передаёт слиянию дублей
+    expect(within(details).getByRole('button', { name: 'Контроль достоверности' })).toBeInTheDocument()
     expect(within(details).getByRole('button', { name: 'База знаний' })).toBeInTheDocument()
     await user.click(within(details).getByRole('button', { name: 'Слияние дублей' }))
     expect(within(screen.getByRole('article')).getByRole('heading', { name: 'Слияние дублей' })).toBeInTheDocument()
@@ -37,7 +41,7 @@ describe('Agents page', () => {
     // рецензент: общие вход и выход, свои критерии
     await user.click(within(scheme).getByRole('button', { name: /Тест-аналитик/ }))
     const qa = screen.getByRole('article')
-    expect(within(qa).getByText(/Шесть рецензентов работают параллельно/)).toBeInTheDocument()
+    expect(within(qa).getByText(/Шесть рецензентов — воркеры планировщика/)).toBeInTheDocument()
     expect(within(qa).getByText('Валидируемость')).toBeInTheDocument()
   })
 
@@ -46,6 +50,6 @@ describe('Agents page', () => {
     expect(within(screen.getByRole('article')).getByRole('link', { name: 'Открыть базу знаний' })).toHaveAttribute('href', '/knowledge')
     const matrix = screen.getByRole('table', { name: 'Кто за какие критерии отвечает' })
     expect(within(matrix).getByRole('img', { name: 'Контролёр логики правил: Непротиворечивость' })).toBeInTheDocument()
-    expect(within(matrix).getAllByRole('img', { name: /^Инспектор требований:/ })).toHaveLength(10)
+    expect(within(matrix).getAllByRole('img', { name: /^Инспектор требований:/ })).toHaveLength(9)
   })
 })
