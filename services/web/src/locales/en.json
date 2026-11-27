@@ -11,6 +11,8 @@
     "usage": "Token usage",
     "audit": "Audit log",
     "settings": "Settings",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar",
     "menu": "Menu"
   },
   "common": {

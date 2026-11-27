@@ -28,8 +28,8 @@ function initialLanguage(): string {
   } catch {
     /* хранилище недоступно */
   }
-  const nav = typeof navigator !== 'undefined' ? navigator.language?.slice(0, 2) : undefined
-  return nav && resources[nav] ? nav : DEFAULT_LANG
+  // Продукт русскоязычный по умолчанию; выбор пользователя запоминается.
+  return DEFAULT_LANG
 }
 
 void i18n.use(initReactI18next).init({

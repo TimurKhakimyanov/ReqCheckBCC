@@ -84,6 +84,12 @@ const qs = (params: Record<string, string | number | undefined | null>) => {
 
 /** Загрузка файла с прогрессом (fetch не умеет прогресс отправки). */
 function upload<T>(path: string, form: FormData, onProgress?: (pct: number) => void): Promise<T> {
+  // Моки в странице перехватывают только fetch — загрузка без прогресса
+  if (typeof window !== 'undefined' && window.__REQCHECK_INPAGE_MOCKS__)
+    return request<T>(path, { method: 'POST', body: form }).then((r) => {
+      onProgress?.(100)
+      return r
+    })
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${API_BASE}${path}`)

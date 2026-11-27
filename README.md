@@ -54,8 +54,8 @@ docker compose --profile mock up -d --build web-mock   # http://localhost:8081, 
 - **Тема и стиль**: все цвета, радиусы и шрифты — CSS-переменные в `services/web/src/index.css` (светлая и тёмная).
   Перекраска под фирменный стиль — правка токенов, компоненты не трогаются.
 - **Типы отчёта** генерируются из JSON Schema контракта и лежат в git (`src/api/report.gen.ts`); тест падает, если они устарели.
-  Перегенерировать: `docker compose -p reqcheck-web --profile test run --rm --build test-web pnpm gen:types` с монтированием
-  каталога либо любой Node-контейнер с `pnpm gen:types` в `services/web`.
+  Перегенерировать после изменения контракта (в контейнере, на хосте ничего не ставится):
+  `docker run --rm -v "$PWD:/repo" -w /repo/services/web node:22-alpine sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm gen:types && rm -rf node_modules"`.
 - **Корпоративный прокси с подменой TLS**: если сборка падает на `unable to verify the first certificate`, положите корневой
   сертификат в `services/web/certs/*.crt` (в git не попадает, см. `services/web/certs/README.md`).
 - Пожелания веба к API: [docs/contract-changes/web.md](docs/contract-changes/web.md).

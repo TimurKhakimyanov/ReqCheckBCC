@@ -141,6 +141,8 @@
 /* Подсветка цитат в тексте документа */
 mark.rc-hl {
   color: inherit;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
   border-radius: 2px;
   cursor: pointer;
   padding: 1px 0;

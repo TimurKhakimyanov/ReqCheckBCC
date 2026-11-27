@@ -5,6 +5,8 @@ import {
   FileText,
   LogOut,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   ScrollText,
   Search,
   Settings,
@@ -30,19 +32,19 @@ const NAV = [
   { to: '/settings', icon: Settings, key: 'nav.settings' },
 ] as const
 
-function Brand() {
+function Brand({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation()
   return (
     <div className="flex items-center gap-2 px-2 font-semibold">
       <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
         <ShieldCheck className="size-4" />
       </span>
-      {t('app.name')}
+      {!compact && t('app.name')}
     </div>
   )
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarContent({ onNavigate, compact = false, onToggle }: { onNavigate?: () => void; compact?: boolean; onToggle?: () => void }) {
   const { t } = useTranslation()
   const { data: me } = useMe()
   const qc = useQueryClient()
@@ -53,34 +55,46 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   }
   return (
     <div className="flex h-full flex-col gap-4 p-3">
-      <Brand />
+      <div className={cn('flex items-center', compact ? 'flex-col gap-2' : 'justify-between')}>
+        <Brand compact={compact} />
+        {onToggle && (
+          <Button variant="ghost" size="icon-sm" onClick={onToggle} aria-label={t(compact ? 'nav.expand' : 'nav.collapse')} title={t(compact ? 'nav.expand' : 'nav.collapse')}>
+            {compact ? <PanelLeftOpen /> : <PanelLeftClose />}
+          </Button>
+        )}
+      </div>
       <nav className="flex flex-1 flex-col gap-0.5">
         {NAV.map(({ to, icon: Icon, key }) => (
           <NavLink
             key={to}
             to={to}
             onClick={onNavigate}
+            title={compact ? t(key) : undefined}
+            aria-label={compact ? t(key) : undefined}
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground',
+                compact && 'justify-center',
                 isActive && 'bg-accent text-accent-foreground',
               )
             }
           >
             <Icon className="size-4" />
-            {t(key)}
+            {!compact && t(key)}
           </NavLink>
         ))}
       </nav>
-      {USE_MOCKS && (
+      {USE_MOCKS && !compact && (
         <div className="rounded-md border border-dashed px-2.5 py-2 text-xs text-muted-foreground">{t('app.mockMode')}</div>
       )}
-      <div className="flex items-center justify-between gap-1 border-t pt-3">
-        <div className="min-w-0 px-1">
-          <div className="truncate text-sm font-medium">{me?.username}</div>
-          <div className="text-xs text-muted-foreground">v{APP_VERSION}</div>
-        </div>
-        <div className="flex items-center">
+      <div className={cn('flex items-center justify-between gap-1 border-t pt-3', compact && 'flex-col')}>
+        {!compact && (
+          <div className="min-w-0 px-1">
+            <div className="truncate text-sm font-medium">{me?.username}</div>
+            <div className="text-xs text-muted-foreground">v{APP_VERSION}</div>
+          </div>
+        )}
+        <div className={cn('flex items-center', compact && 'flex-col')}>
           <LanguageSwitch />
           <ThemeToggle />
           <Button variant="ghost" size="icon-sm" onClick={logout} aria-label={t('auth.signOut')} title={t('auth.signOut')}>
@@ -92,16 +106,34 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+const COLLAPSE_KEY = 'reqcheck.sidebar.collapsed'
+
 export function AppShell() {
   const [open, setOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(COLLAPSE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggle = () =>
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
+      } catch {
+        /* ignore */
+      }
+      return !c
+    })
   const { t } = useTranslation()
   const loc = useLocation()
   // Экран отчёта занимает всю высоту и сам управляет прокруткой панелей.
   const fullBleed = /^\/runs\//.test(loc.pathname)
   return (
     <div className="flex h-full">
-      <aside className="hidden w-60 shrink-0 border-r bg-sidebar text-sidebar-foreground lg:block">
-        <SidebarContent />
+      <aside className={cn('hidden shrink-0 border-r bg-sidebar text-sidebar-foreground lg:block', collapsed ? 'w-16' : 'w-60')}>
+        <SidebarContent compact={collapsed} onToggle={toggle} />
       </aside>
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden">
