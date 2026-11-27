@@ -11,7 +11,7 @@ x-python-build: &python-build
 x-app-env: &app-env
   APP_ENV: ${APP_ENV:-production}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-reqcheck}
   REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
   QDRANT_URL: http://qdrant:6333
   QDRANT_API_KEY: ${QDRANT_API_KEY}
@@ -165,9 +165,9 @@ services:
     image: postgres:18.7-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:?задайте POSTGRES_DB в .env}
-      POSTGRES_USER: ${POSTGRES_USER:?задайте POSTGRES_USER в .env}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      POSTGRES_DB: ${POSTGRES_DB:-reqcheck}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER пуст — заполните .env генератором секретов (команда в .env.example)}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD пуст — заполните .env генератором секретов (команда в .env.example)}
     # Postgres 18+: данные лежат в /var/lib/postgresql/<major>/docker — монтируем родительский каталог.
     volumes: ["postgres-data:/var/lib/postgresql"]
     shm_size: 256m
@@ -189,7 +189,7 @@ services:
     image: redis:8.10.3-alpine
     restart: unless-stopped
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?задайте REDIS_PASSWORD в .env}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD пуст — заполните .env генератором секретов (команда в .env.example)}
     # Пароль берётся из окружения внутри контейнера, а не из командной строки (не светится в docker inspect/ps).
     # noeviction: Redis — брокер Celery, вытеснять задачи нельзя.
     command:
@@ -212,7 +212,7 @@ services:
     image: qdrant/qdrant:v1.20.2
     restart: unless-stopped
     environment:
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?задайте QDRANT_API_KEY в .env}
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY пуст — заполните .env генератором секретов (команда в .env.example)}
       QDRANT__TELEMETRY_DISABLED: "true"
     volumes:
       - qdrant-data:/qdrant/storage
@@ -236,8 +236,8 @@ services:
     # entrypoint собирает s3.json из S3_ACCESS_KEY/S3_SECRET_KEY и создаёт бакет S3_BUCKET.
     entrypoint: ["/bin/sh", "/etc/seaweedfs/entrypoint.sh"]
     environment:
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?задайте S3_ACCESS_KEY в .env}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:?задайте S3_SECRET_KEY в .env}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY пуст — заполните .env генератором секретов (команда в .env.example)}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY пуст — заполните .env генератором секретов (команда в .env.example)}
       S3_BUCKET: ${S3_BUCKET:-reqcheck}
       SEAWEEDFS_VOLUME_SIZE_MB: ${SEAWEEDFS_VOLUME_SIZE_MB:-1024}
     volumes:
@@ -343,7 +343,7 @@ services:
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?задайте GRAFANA_ADMIN_PASSWORD в .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD пуст — заполните .env генератором секретов (команда в .env.example)}
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-}
       GF_SERVER_SERVE_FROM_SUB_PATH: ${GRAFANA_SERVE_FROM_SUB_PATH:-false}
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -421,7 +421,7 @@ services:
     profiles: [monitoring]
     restart: unless-stopped
     environment:
-      DATA_SOURCE_URI: postgres:5432/${POSTGRES_DB}?sslmode=disable
+      DATA_SOURCE_URI: postgres:5432/${POSTGRES_DB:-reqcheck}?sslmode=disable
       DATA_SOURCE_USER: ${POSTGRES_USER}
       DATA_SOURCE_PASS: ${POSTGRES_PASSWORD}
     depends_on:
@@ -492,7 +492,7 @@ services:
     command: ["backup"]
     environment: &tools-env
       PGHOST: postgres
-      PGDATABASE: ${POSTGRES_DB}
+      PGDATABASE: ${POSTGRES_DB:-reqcheck}
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       REDIS_HOST: redis

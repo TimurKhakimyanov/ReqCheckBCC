@@ -41,8 +41,16 @@
 
 ## Профиль offline / gpu
 
-При включении `offline` или `gpu` в `.env` ставьте `LLM_PROVIDER=openai_compatible`,
-`OPENAI_COMPATIBLE_BASE_URL=http://ollama:11434/v1`, `OPENAI_COMPATIBLE_MODEL=<модель из OLLAMA_MODELS>`,
-`OPENAI_COMPATIBLE_API_KEY=ollama` (Ollama ключ не проверяет, но OpenAI SDK требует непустой).
-Ядру: `list_models` для `openai_compatible` может брать список из `GET /v1/models`.
+Настройки ИИ больше не задаются в `.env`. При включении `offline` или `gpu` в «Администрировании» выбирают
+провайдера `openai_compatible` с адресом `http://ollama:11434/v1` и моделью из `OLLAMA_MODELS`. Если ключ
+пуст, бэкенду стоит подставлять любой непустой (например `ollama`): Ollama ключ не проверяет, а OpenAI SDK
+требует непустой. Ядру: `list_models` для `openai_compatible` может брать список из `GET /v1/models`.
+
+## `.env` после перехода на админку (раунд 2026-11-27)
+
+`.env.example` содержит только секреты и логины; `x-app-env.DATABASE_URL` получил `${POSTGRES_DB:-reqcheck}`
+(иначе без `POSTGRES_DB` в `.env` имя базы было бы пустым). Владельцам сервисов приложений: убрать из своего
+`environment` переменные, которых больше нет в `.env.example` (`LLM_*`, `*_API_KEY` провайдеров,
+`OPENAI_COMPATIBLE_*`, `REQCHECK_*`, `EMBEDDINGS_*`, `RUN_TIMEOUT_S`, `SESSION_TTL_HOURS`, `COOKIE_SECURE`,
+`MAX_UPLOAD_MB`, `WORKER_CONCURRENCY`), или дать им значения по умолчанию `${VAR:-…}`.
 Embedder в офлайне должен иметь модель внутри образа (аргумент сборки `EMBEDDINGS_MODEL` уже есть в compose).
