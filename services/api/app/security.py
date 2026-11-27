@@ -33,11 +33,10 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_session_token(user_id: uuid.UUID, username: str) -> str:
-    s = get_settings()
+def create_session_token(user_id: uuid.UUID, username: str, ttl_hours: int = 12) -> str:
     now = datetime.now(timezone.utc)
-    payload = {"sub": str(user_id), "name": username, "iat": now, "exp": now + timedelta(hours=s.session_ttl_hours)}
-    return jwt.encode(payload, s.app_secret_key, algorithm=JWT_ALG)
+    payload = {"sub": str(user_id), "name": username, "iat": now, "exp": now + timedelta(hours=ttl_hours)}
+    return jwt.encode(payload, get_settings().app_secret_key, algorithm=JWT_ALG)
 
 
 def decode_session_token(token: str) -> dict | None:

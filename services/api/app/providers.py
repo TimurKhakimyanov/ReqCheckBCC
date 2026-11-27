@@ -1,20 +1,28 @@
-"""Настройки провайдеров LLM: хранение ключей и сборка ProviderConfig (используется API и воркером)."""
+"""Настройки провайдеров LLM: хранение ключей и сборка ProviderConfig (используется API и воркером).
+
+Источник истины — БД (кабинет администратора). Переменные окружения для ИИ не читаются.
+"""
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from pydantic import SecretStr
 from req_contracts import ProviderConfig, ProviderName
 from sqlalchemy.orm import Session
 
-from .config import PROVIDERS, get_settings
+from .app_settings import AppSettings, get_app_settings, load_row
+from .audit import audit
+from .config import PROVIDERS
+from .db import SessionLocal
 from .models import ProviderSetting
 from .security import decrypt_secret, encrypt_secret, key_hint
 
 log = logging.getLogger(__name__)
 
-# Подсказки для выпадающего списка, если провайдер недоступен или ядро ещё не умеет list_models.
+# Подсказки, если провайдер недоступен или модель не выбрана. Для openai_compatible модель задаёт админ.
 FALLBACK_MODELS: dict[str, list[str]] = {
     "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
     "openai": ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
@@ -27,12 +35,20 @@ class ProviderNotConfigured(Exception):
     pass
 
 
+@dataclass
+class Overrides:
+    """Несохранённые значения из формы (POST /providers/{p}/test) поверх сохранённых."""
+
+    api_key: str | None = None
+    base_url: str | None = None
+    extra_body: dict | None = None
+    extra_body_set: bool = False  # extra_body передан явно (в т. ч. null — проверить без него)
+
+
 def get_or_create(db: Session, provider: str) -> ProviderSetting:
     row = db.get(ProviderSetting, provider)
     if row is None:
         row = ProviderSetting(provider=provider, enabled=True)
-        if provider == "openai_compatible":
-            row.base_url = get_settings().openai_compatible_base_url
         db.add(row)
         db.flush()
     return row
@@ -48,71 +64,169 @@ def set_api_key(row: ProviderSetting, api_key: str) -> None:
 
 
 def seed_providers(db: Session) -> None:
-    """Создаёт строки провайдеров; ключи из .env записываются, только если в кабинете ключа ещё нет."""
-    s = get_settings()
+    """Создаёт строки всех провайдеров (пустые: ключи и адреса вводятся в кабинете)."""
     for provider in PROVIDERS:
-        row = get_or_create(db, provider)
-        initial = s.initial_key(provider)
-        if initial and not row.api_key_encrypted:
-            set_api_key(row, initial)
-            log.info("seeded provider key from environment", extra={"provider": provider})
-        if provider == "openai_compatible" and not row.default_model and s.openai_compatible_model:
-            row.default_model = s.openai_compatible_model
-        if provider == s.default_llm_provider and not row.default_model and s.default_llm_model:
-            row.default_model = s.default_llm_model
+        get_or_create(db, provider)
     db.commit()
 
 
+def is_configured(row: ProviderSetting | None) -> bool:
+    """openai_compatible настроен, если задан адрес сервера (ключ необязателен); остальные — если есть ключ."""
+    if row is None or not row.enabled:
+        return False
+    if row.provider == ProviderName.OPENAI_COMPATIBLE.value:
+        return bool(row.base_url)
+    return bool(row.api_key_encrypted)
+
+
 def default_provider(db: Session) -> str:
-    """Провайдер по умолчанию: из настроек, если он настроен, иначе первый с ключом."""
-    s = get_settings()
+    """Провайдер по умолчанию из настроек, если он настроен, иначе первый настроенный."""
+    preferred = get_app_settings(db).default_provider.value
     rows = {r.provider: r for r in db.query(ProviderSetting).all()}
-
-    def usable(p: str) -> bool:
-        r = rows.get(p)
-        return bool(r and r.enabled and (r.api_key_encrypted or p == "openai_compatible"))
-
-    if s.default_llm_provider in PROVIDERS and usable(s.default_llm_provider):
-        return s.default_llm_provider
+    if is_configured(rows.get(preferred)):
+        return preferred
     for p in PROVIDERS:
-        if p != "openai_compatible" and usable(p):
+        if is_configured(rows.get(p)):
             return p
-    return s.default_llm_provider if s.default_llm_provider in PROVIDERS else "gemini"
+    return preferred
 
 
-def resolve_model(db: Session, provider: str, model: str | None) -> str:
+def resolve_model(db: Session, provider: str, model: str | None, settings: AppSettings | None = None) -> str:
     if model:
         return model
     row = db.get(ProviderSetting, provider)
     if row and row.default_model:
         return row.default_model
-    s = get_settings()
-    if provider == s.default_llm_provider and s.default_llm_model:
-        return s.default_llm_model
+    settings = settings or get_app_settings(db)
+    if provider == settings.default_provider.value and settings.default_model:
+        return settings.default_model
     fallback = FALLBACK_MODELS.get(provider) or []
     if fallback:
         return fallback[0]
-    raise ProviderNotConfigured(f"Не указана модель для провайдера {provider}")
+    raise ProviderNotConfigured(f"Не указана модель для провайдера {provider}. Выберите модель в настройках")
 
 
-def build_provider_config(db: Session, provider: str, model: str | None = None,
-                          *, require_enabled: bool = True) -> ProviderConfig:
+def build_provider_config(db: Session, provider: str, model: str | None = None, *, require_enabled: bool = True,
+                          overrides: Overrides | None = None, require_model: bool = True) -> ProviderConfig:
     if provider not in PROVIDERS:
         raise ProviderNotConfigured(f"Неизвестный провайдер: {provider}")
-    row = db.get(ProviderSetting, provider)
-    if row is None:
-        row = get_or_create(db, provider)
+    row = db.get(ProviderSetting, provider) or get_or_create(db, provider)
     if require_enabled and not row.enabled:
         raise ProviderNotConfigured(f"Провайдер {provider} отключён в настройках")
-    api_key = decrypt_secret(row.api_key_encrypted) if row.api_key_encrypted else None
-    if row.api_key_encrypted and api_key is None:
-        raise ProviderNotConfigured(f"Не удалось расшифровать ключ {provider}: сменился APP_ENCRYPTION_KEY? Задайте ключ заново")
-    if not api_key and provider != "openai_compatible":
+    settings = get_app_settings(db)
+
+    api_key: str | None
+    if overrides and overrides.api_key is not None:
+        api_key = overrides.api_key.strip() or None
+    elif row.api_key_encrypted:
+        api_key = decrypt_secret(row.api_key_encrypted)
+        if api_key is None:
+            raise ProviderNotConfigured(
+                f"Не удалось расшифровать ключ {provider}: сменился APP_ENCRYPTION_KEY? Задайте ключ заново")
+    else:
+        api_key = None
+    base_url = (overrides.base_url.strip() if overrides and overrides.base_url is not None else row.base_url) or None
+
+    if provider == ProviderName.OPENAI_COMPATIBLE.value:
+        if not base_url:
+            raise ProviderNotConfigured("Укажите адрес OpenAI-совместимого сервера (base_url), например http://vllm.example.local:8000/v1")
+    elif not api_key:
         raise ProviderNotConfigured(f"Не задан API-ключ провайдера {provider}. Укажите его в настройках")
-    base_url = row.base_url or (get_settings().openai_compatible_base_url if provider == "openai_compatible" else None)
+
+    try:
+        resolved = resolve_model(db, provider, model, settings)
+    except ProviderNotConfigured:
+        if require_model:
+            raise
+        resolved = ""
     return ProviderConfig(
         provider=ProviderName(provider),
-        model=resolve_model(db, provider, model),
+        model=resolved,
         api_key=SecretStr(api_key) if api_key else None,
         base_url=base_url,
+        min_interval_s=settings.min_interval_s,
+        max_attempts=settings.max_attempts,
+        max_output_tokens=row.max_output_tokens,
+        **({"timeout_s": float(row.timeout_s)} if row.timeout_s else {}),
+        extra_body=overrides.extra_body if overrides and overrides.extra_body_set else row.extra_body,
+        extra_body_set_review=row.extra_body_set_review,
     )
+
+
+# Предпочтения при выборе модели для проверки ключа, если модель по умолчанию не задана или недоступна:
+# недорогая актуальная модель семейства (подстроки по порядку), иначе первая из списка.
+PREFERRED_MODEL_HINTS: dict[str, tuple[str, ...]] = {
+    "anthropic": ("sonnet", "haiku"),
+    "gemini": ("flash", "pro"),
+    "openai": ("mini", "gpt-4"),
+}
+
+
+def configured_default_model(db: Session, provider: str) -> str | None:
+    """Модель по умолчанию, заданная админом: в карточке провайдера или в /settings для провайдера по умолчанию."""
+    row = db.get(ProviderSetting, provider)
+    if row is not None and row.default_model:
+        return row.default_model
+    settings = get_app_settings(db)
+    if settings.default_provider.value == provider and settings.default_model:
+        return settings.default_model
+    return None
+
+
+def preferred_model(provider: str, models: list[str]) -> str | None:
+    if not models:
+        return None
+    for hint in PREFERRED_MODEL_HINTS.get(provider, ()):
+        # самые новые версии обычно идут позже по алфавиту (claude-sonnet-4-5 > claude-sonnet-4)
+        matches = sorted((m for m in models if hint in m.lower()), reverse=True)
+        if matches:
+            return matches[0]
+    return models[0]
+
+
+def default_model_valid(default: str | None, models: list[str]) -> bool | None:
+    """None — проверить нельзя (модель не задана или список моделей не получен)."""
+    if not default or not models:
+        return None
+    return default in models
+
+
+def unavailable_warning(default: str) -> str:
+    return f"Модель по умолчанию {default} недоступна у провайдера — выберите другую"
+
+
+def reset_stale_default_models(list_models: Callable[[ProviderConfig], list[str]]) -> list[tuple[str, str]]:
+    """Старт api: обнулить сохранённые модели по умолчанию, которых нет у провайдера.
+
+    Трогает провайдера, только если его список моделей удалось получить и он не пуст. Возвращает (провайдер, модель).
+    """
+    reset: list[tuple[str, str]] = []
+    with SessionLocal() as db:
+        settings_row = load_row(db)
+        settings = AppSettings.model_validate(settings_row.data)
+        for provider in PROVIDERS:
+            row = db.get(ProviderSetting, provider)
+            defaults = {d for d in (row.default_model if row else None,
+                                    settings.default_model if settings.default_provider.value == provider else None) if d}
+            if not defaults or not is_configured(row):
+                continue
+            try:
+                cfg = build_provider_config(db, provider, None, require_enabled=False, require_model=False)
+                models = set(list_models(cfg.model_copy(update={"timeout_s": 20.0, "max_attempts": 1})) or [])
+            except Exception as e:  # noqa: BLE001 — провайдер недоступен: ничего не трогаем
+                log.info("default model check skipped", extra={"provider": provider, "error": str(e)[:200]})
+                continue
+            if not models:
+                continue
+            if row.default_model and row.default_model not in models:
+                reset.append((provider, row.default_model))
+                row.default_model = None
+            if settings.default_provider.value == provider and settings.default_model \
+                    and settings.default_model not in models:
+                reset.append((provider, settings.default_model))
+                settings_row.data = {**settings_row.data, "default_model": None}
+        for provider, model in reset:
+            log.warning("stale default model reset", extra={"provider": provider, "model": model})
+            audit(db, "system", "default_model_reset", provider, {"model": model}, commit=False)
+        db.commit()
+    return reset

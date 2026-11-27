@@ -114,6 +114,28 @@ def ensure_builtin(svc: Services) -> bool:
         return db.get(KnowledgeItem, item_id).status == "ready"
 
 
+def reindex_all(svc: Services) -> bool:
+    """Смена модели эмбеддингов в настройках: пересоздать коллекции и проиндексировать всё заново."""
+    for name in (KNOWLEDGE, REQUIREMENTS):
+        try:
+            if svc.qdrant.collection_exists(name):
+                svc.qdrant.delete_collection(name)
+        except Exception:  # noqa: BLE001
+            log.warning("cannot drop collection", extra={"collection": name}, exc_info=True)
+    svc.vectors.reset()
+    try:
+        ok = sync_vectors(svc)
+    except Exception as e:  # noqa: BLE001 — например, неверный ключ внешнего провайдера эмбеддингов
+        log.warning("reindex failed", extra={"error": str(e)}, exc_info=not isinstance(e, EmbedderError))
+        with SessionLocal() as db:
+            for item in db.scalars(select(KnowledgeItem)).all():
+                item.status, item.error = "failed", f"Эмбеддинги недоступны: {e}"[:500]
+            db.commit()
+        return False
+    log.info("vectors reindexed after embeddings change")
+    return ok
+
+
 def sync_vectors(svc: Services) -> bool:
     """Старт api: если коллекции Qdrant созданы заново (пустой Qdrant или смена модели эмбеддингов) —
     переиндексировать базу знаний и отчёты прошлых прогонов; затем убедиться во встроенном элементе."""

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from ..audit import audit
-from ..config import get_settings
+from ..app_settings import get_app_settings
 from ..deps import DB, CurrentUser, Svc, parse_uuid
 from ..errors import ApiError, not_found
 from ..knowledge import extract_text, index_item
@@ -69,10 +69,11 @@ async def add_knowledge(request: Request, background: BackgroundTasks, user: Cur
         name = safe_name(upload.filename or "knowledge.txt")
         if FORMATS.get("." + name.rsplit(".", 1)[-1].lower()) is None:
             raise ApiError(415, "unsupported_format", "Поддерживаются файлы PDF, DOCX, MD и TXT")
-        limit = get_settings().max_upload_mb * 1024 * 1024
+        max_mb = get_app_settings(db).max_upload_mb
+        limit = max_mb * 1024 * 1024
         data = await upload.read(limit + 1)
         if len(data) > limit:
-            raise ApiError(413, "file_too_large", f"Файл больше {get_settings().max_upload_mb} МБ")
+            raise ApiError(413, "file_too_large", f"Файл больше {max_mb} МБ")
         try:
             text = await run_in_threadpool(extract_text, name, data)
         except NotImplementedError as e:

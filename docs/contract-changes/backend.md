@@ -3,6 +3,22 @@
 Реализовано по [docs/api.md](../api.md); первичен OpenAPI `/api/openapi.json` (Swagger UI: `/api/docs`).
 Ниже — где реализация уточняет или расширяет черновик. Обратно совместимо: только новые поля и необязательные параметры.
 
+## Раунд «всё про ИИ — в админке» (для сессии «Веб»)
+
+| Где | Что |
+| :--- | :--- |
+| **Новое** `GET/PUT /api/settings` | Настройки приложения: провайдер и модель по умолчанию, `run_timeout_s`, `min_interval_s`, `max_attempts`, `batch_size`, `concurrency`, эмбеддинги (`embeddings_provider: local\|gemini\|openai`, `embeddings_model`, `embeddings_dim`, ключ `embeddings_api_key` → наружу только `embeddings_has_key`/`embeddings_key_hint`), `max_upload_mb`, `session_ttl_hours`. `PUT` — частичный: передавайте только изменённые поля; `null` в `default_model`/`embeddings_model`/`embeddings_dim` — сброс; `embeddings_api_key: ""` — удалить ключ. Ошибки диапазонов — `422`. Схема и диапазоны — в `docs/api.md`, раздел «Настройки приложения». |
+| `POST /providers/{p}/test` | Необязательное тело `{api_key?, base_url?}` — значения из формы до сохранения. Ответ `{ok, latency_ms, error?, models: [..]}`: выпадающий список моделей можно заполнить сразу после ввода ключа/адреса. Ничего не сохраняет. |
+| `GET /providers/{p}/models` | Живой список с сохранёнными данными; при ошибке — `{models: подсказки, error}`. |
+| `openai_compatible` | Настроен, если задан `base_url`; ключ необязателен. Адреса по умолчанию больше нет (`base_url: null`, пока админ не задаст). В форме ключ для этого провайдера — необязательное поле. |
+| `POST /runs` | Без `provider`/`model` — из `/settings` (`default_provider`, `default_model`); если провайдер не настроен — первый настроенный. `batch_size`/`concurrency` берутся из настроек, если не заданы в `options`; итоговые значения видны в `Run.options`. |
+| `GET /health` → `limits.max_upload_mb` | Теперь из настроек (меняется без перезапуска). |
+| `Provider` (`GET/PUT /providers`) | Новые поля `extra_body`, `extra_body_set_review` (JSON-объект или `null`; принимается и строка с JSON-объектом, иначе `422`) и `max_output_tokens` (целое ≥ 1 или `null`). В `PUT` передавайте только изменённые поля; `null` — сброс. Удобно показать их в разделе «Дополнительно» формы провайдера; для `openai_compatible` с моделью-«рассуждателем» пример: `extra_body = {"chat_template_kwargs": {"enable_thinking": false}}`, `extra_body_set_review = {"chat_template_kwargs": {"enable_thinking": true}}`. |
+| `default_model_valid`, `warning`, `model` (`test`, `models`) | Устаревшая модель по умолчанию (например, снятая с поддержки у Anthropic) больше не ломает «Проверить подключение»: `test` проверяет на подходящей модели из живого списка (для Anthropic — sonnet, затем haiku), отвечает `ok: true`, `model` — на какой проверено, `default_model_valid: false` и `warning` «Модель по умолчанию … недоступна у провайдера — выберите другую». Показывайте `warning` рядом с выбором модели. `GET /models` отдаёт `default_model`, `default_model_valid`, `warning`. При старте api устаревшие сохранённые модели по умолчанию обнуляются (только если список моделей получен). |
+| `Provider.timeout_s` | Таймаут одного запроса к модели, с (10…3600, `null` — 180 по умолчанию ядра). Для vLLM-модели с рассуждениями — 900. Передаётся в `ProviderConfig` и в `test`. Поле стоит показать рядом с `max_output_tokens`. |
+| `POST /providers/{p}/test` (тело) | Можно передать и несохранённый `extra_body` (`null` — проверить без него). Без этого поля используется сохранённый — проверка vLLM-модели без отключения рассуждений идёт минутами. |
+| Смена эмбеддингов | После `PUT /settings` с другим провайдером/моделью эмбеддингов база знаний и поиск переиндексируются в фоне; элементы базы знаний на это время в `status: indexing`, при ошибке ключа — `failed` с текстом. |
+
 ## HTTP API (для сессии «Веб»)
 
 | Где | Что |
@@ -11,10 +27,7 @@
 | `Run.summary`, `Document.last_run.summary` | `Report.summary` + `ready_for_development`, `ready_for_testing` (из `Report.conclusion`); в `by_severity` всегда все три ключа. |
 | `DELETE /knowledge/{id}` | Встроенный материал (`source: builtin`) — `409 builtin_protected`. |
 | Выгрузки и исходный файл | `Content-Disposition: attachment; filename="<ascii>"; filename*=UTF-8''<имя>`. |
-| `POST /runs` | `provider` и `model` необязательны: по умолчанию — провайдер из `LLM_PROVIDER` (если у него есть ключ, иначе первый с ключом) и его `default_model`. `400 provider_not_configured`, если ключа нет. |
 | `POST /documents`, `POST /knowledge` | Ответ `201`. Ошибки: `415 unsupported_format`, `413 file_too_large`, `400 empty_file`. |
-| `GET /providers/{p}/models` | Всегда `200 {models, error?}`: если провайдер недоступен или ядро не умеет `list_models`, возвращается список-подсказка и текст `error`. |
-| `POST /providers/{p}/test` | Ошибка провайдера — `200 {ok: false, latency_ms, error}`. |
 | `FindingReview` | `{finding_id, status, comment?, updated_at?}`; без записи — `status: "open"`. |
 | `POST /runs/{id}/chat` | Кроме `token` и `done` бывает `event: error` с `data: {detail, code}` — после него поток закрывается. Отчёт должен быть готов, иначе `404 report_not_ready`. |
 | SSE `/runs/{id}/events` | Перед первым событием — `retry: 3000`; каждые ~15 с комментарий `: keepalive`. |
@@ -60,4 +73,12 @@
 - `render_report(report, "md"|"docx"|"pdf")` вызывается воркером; падение одного формата не валит прогон.
 - API вызывает `answer_question` (чат), `get_llm(cfg).complete(system, user)` (кнопка «Проверить ключ»),
   `list_models(cfg)`, `parse_document` (загрузка PDF/DOCX в базу знаний).
-- `ProviderConfig.base_url` для `openai_compatible` по умолчанию — `OPENAI_COMPATIBLE_BASE_URL`.
+- `ProviderConfig.base_url` для `openai_compatible` задаётся в админке; ключ может быть `None`. `extra_body`, `extra_body_set_review` и `max_output_tokens` — из настроек провайдера; `min_interval_s` и `max_attempts` воркер берёт из `/settings` — ядру в режиме api/worker не нужно читать `LLM_MIN_INTERVAL_S`, `LLM_MAX_ATTEMPTS`, `REQCHECK_BATCH_SIZE`, `OPENAI_COMPATIBLE_*` и `*_API_KEY` из окружения (в контейнерах api/worker их больше нет).
+
+## Для main / «Инфраструктуры» (`compose.yaml`, общий якорь `x-app-env`)
+- api/worker больше не читают `DEFAULT_LLM_PROVIDER`, `DEFAULT_LLM_MODEL`, `OPENAI_COMPATIBLE_BASE_URL` — их можно убрать
+  из `x-app-env` (это общий блок, бэкенд его не правит). Из моих разделов убраны `MAX_UPLOAD_MB`, `RUN_TIMEOUT_S`,
+  `SESSION_TTL_HOURS`, все `*_API_KEY`, `OPENAI_COMPATIBLE_*`, `EMBEDDINGS_*`. В окружении остались `COOKIE_SECURE` (зависит
+  от TLS на хосте) и `WORKER_CONCURRENCY` (размер пула воркера, нужен перезапуск).
+- `EMBEDDINGS_MODEL` остаётся только аргументом сборки `embedder`: какую локальную модель вшить в образ (имя пишется в
+  `/models/MODEL`). В рантайме embedder окружение не читает; внешний провайдер, модель и ключ приходят в запросе от api.

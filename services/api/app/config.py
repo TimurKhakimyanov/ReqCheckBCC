@@ -31,28 +31,13 @@ class Settings(BaseSettings):
     app_encryption_key: str = "change-me"
     admin_username: str = "admin"
     admin_password: str = ""
-    session_ttl_hours: int = 12
+    # Secure-флаг cookie зависит от TLS на хосте, поэтому остаётся в окружении.
+    # Всё про ИИ (провайдеры, ключи, модели, таймауты, эмбеддинги) — в админке: app/app_settings.py.
     cookie_secure: bool = False
-
-    max_upload_mb: int = 25
-    run_timeout_s: int = 1800
-
-    default_llm_provider: str = "gemini"
-    default_llm_model: str = ""
-    openai_compatible_base_url: str = "http://ollama:11434/v1"
-    # Начальные ключи провайдеров: записываются в кабинет при старте, если там ключа ещё нет.
-    gemini_api_key: str = ""
-    openai_api_key: str = ""
-    anthropic_api_key: str = ""
-    openai_compatible_api_key: str = ""
-    openai_compatible_model: str = ""
 
     @property
     def is_test(self) -> bool:
         return self.app_env == "test"
-
-    def initial_key(self, provider: str) -> str:
-        return getattr(self, f"{provider}_api_key", "") or ""
 
 
 @lru_cache

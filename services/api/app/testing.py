@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
-from collections.abc import Iterator
+import socket
+from collections.abc import Callable, Iterator
 from importlib import resources
 from pathlib import Path
 
@@ -59,6 +61,41 @@ class RecordingServices(Services):
         return f"task-{run_id}"
 
 
+def block_external_network() -> Callable[[], None]:
+    """Запрещает тестам соединения с внешними адресами: разрешены только loopback и частные сети
+    (postgres, redis в сети compose). Любая попытка сходить к провайдеру LLM падает с понятной ошибкой.
+    Возвращает функцию, снимающую запрет."""
+    original = socket.socket.connect
+    original_ex = socket.socket.connect_ex
+
+    def _check(address) -> None:
+        if isinstance(address, tuple) and address:
+            host = str(address[0])
+            try:
+                ip = ipaddress.ip_address(host.split("%")[0])
+            except ValueError:
+                raise RuntimeError(f"tests must not resolve external hosts: {host}") from None
+            if not (ip.is_loopback or ip.is_private or ip.is_link_local):
+                raise RuntimeError(f"tests must not reach external network: {host}")
+
+    def connect(self, address):
+        _check(address)
+        return original(self, address)
+
+    def connect_ex(self, address):
+        _check(address)
+        return original_ex(self, address)
+
+    socket.socket.connect = connect  # type: ignore[method-assign]
+    socket.socket.connect_ex = connect_ex  # type: ignore[method-assign]
+
+    def restore() -> None:
+        socket.socket.connect = original  # type: ignore[method-assign]
+        socket.socket.connect_ex = original_ex  # type: ignore[method-assign]
+
+    return restore
+
+
 def sample_report_json() -> str:
     return resources.files("req_contracts.fixtures").joinpath("sample_report.json").read_text(encoding="utf-8")
 
@@ -77,3 +114,34 @@ def fake_render_report(report, fmt) -> bytes:
     if fmt == "json":
         return report.model_dump_json().encode()
     return f"%{fmt.upper()} report for {report.passport.document_name}".encode()
+
+
+# Последние конфиги, с которыми API звал ядро (проверка, что ключи/адреса/параметры берутся из БД)
+CORE_CALLS: dict[str, object] = {}
+# Живые списки моделей фейкового провайдера (у anthropic нет устаревшей claude-opus-4-1)
+LIVE_MODELS = {
+    "gemini": ["gemini-2.5-pro", "gemini-2.5-flash"],
+    "anthropic": ["claude-haiku-4-5", "claude-opus-4-5", "claude-sonnet-4", "claude-sonnet-4-5"],
+}
+
+
+def fake_list_models(cfg) -> list[str]:
+    CORE_CALLS["list_models"] = cfg
+    if cfg.api_key is not None and cfg.api_key.get_secret_value() == "bad-key":
+        raise PermissionError("401 invalid api key")
+    return LIVE_MODELS.get(cfg.provider.value, ["model-b", "model-a"])
+
+
+class _FakeLLM:
+    def __init__(self, cfg):
+        self.cfg = cfg
+
+    def complete(self, system: str, user: str) -> str:
+        CORE_CALLS["complete"] = self.cfg
+        if self.cfg.api_key is not None and self.cfg.api_key.get_secret_value() == "bad-key":
+            raise PermissionError("401 invalid api key")
+        return "pong"
+
+
+def fake_get_llm(cfg) -> _FakeLLM:
+    return _FakeLLM(cfg)

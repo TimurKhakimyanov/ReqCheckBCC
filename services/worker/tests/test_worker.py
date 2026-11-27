@@ -15,8 +15,9 @@ import req_core  # noqa: E402
 from app import testing  # noqa: E402
 
 testing.prepare_test_database("worker_test")
+testing.block_external_network()  # тесты не ходят во внешнюю сеть (LLM-провайдеры и т. п.)
 
-from app.config import get_settings  # noqa: E402
+from app.app_settings import AppSettings, load_row  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
 from app.models import Document, ProviderSetting, ReportRow, Run  # noqa: E402
 from app.providers import set_api_key  # noqa: E402
@@ -187,7 +188,13 @@ def test_timeout(svc, monkeypatch):
         return SAMPLE
 
     monkeypatch.setattr(req_core, "validate_document", hang)
-    monkeypatch.setattr(get_settings(), "run_timeout_s", 1)
+    import worker.tasks as tasks
+
+    # в админке минимум 60 с; для теста подменяем прочитанные настройки без валидации
+    monkeypatch.setattr(tasks, "read_app_settings", lambda: AppSettings.model_construct(run_timeout_s=1))
+    build = tasks.build_provider_config  # общий таймаут не короче одного запроса к модели — его тоже укорачиваем
+    monkeypatch.setattr(tasks, "build_provider_config",
+                        lambda *a, **k: build(*a, **k).model_copy(update={"timeout_s": 1.0}))
     run_id = make_run(svc)
     assert run_validation.delay(run_id).get() == "failed"
     assert "Превышено время прогона" in get_run(run_id).error
@@ -232,3 +239,78 @@ def test_metrics_names():
                  "reqcheck_llm_tokens_total"):
         assert name in text, name
     assert 'type="input"' in text and 'status="done"' in text
+
+
+def test_llm_pacing_comes_from_admin_settings(svc, monkeypatch):
+    """min_interval_s и max_attempts — из настроек приложения в БД, а не из окружения."""
+    with SessionLocal() as db:
+        row = load_row(db)
+        row.data = AppSettings(min_interval_s=2.5, max_attempts=3).model_dump(mode="json")
+        db.commit()
+    seen = {}
+
+    def capture(path, llm, *, options=None, on_progress=None, document_name=None):
+        seen["cfg"] = llm
+        return SAMPLE
+
+    monkeypatch.setattr(req_core, "validate_document", capture)
+    run_id = make_run(svc)
+    assert run_validation.delay(run_id).get() == "done"
+    assert seen["cfg"].min_interval_s == 2.5 and seen["cfg"].max_attempts == 3
+    with SessionLocal() as db:
+        load_row(db).data = AppSettings().model_dump(mode="json")
+        db.commit()
+
+
+def test_provider_request_options_reach_core(svc, monkeypatch):
+    """extra_body, extra_body_set_review и max_output_tokens из настроек провайдера попадают в ProviderConfig."""
+    no_think = {"chat_template_kwargs": {"enable_thinking": False}}
+    with SessionLocal() as db:
+        row = db.get(ProviderSetting, "gemini")
+        row.extra_body, row.extra_body_set_review, row.max_output_tokens = no_think, {"x": 1}, 48000
+        db.commit()
+    seen = {}
+
+    def capture(path, llm, *, options=None, on_progress=None, document_name=None):
+        seen["cfg"] = llm
+        return SAMPLE
+
+    monkeypatch.setattr(req_core, "validate_document", capture)
+    try:
+        assert run_validation.delay(make_run(svc)).get() == "done"
+        cfg = seen["cfg"]
+        assert cfg.extra_body == no_think and cfg.extra_body_set_review == {"x": 1} and cfg.max_output_tokens == 48000
+    finally:
+        with SessionLocal() as db:
+            row = db.get(ProviderSetting, "gemini")
+            row.extra_body = row.extra_body_set_review = row.max_output_tokens = None
+            db.commit()
+
+
+def test_provider_timeout_reaches_core_and_extends_run_deadline(svc, monkeypatch):
+    """timeout_s провайдера → ProviderConfig; общий таймаут прогона не короче одного запроса (×1.2)."""
+    import worker.tasks as tasks
+
+    with SessionLocal() as db:
+        db.get(ProviderSetting, "gemini").timeout_s = 900
+        db.commit()
+    seen = {}
+    monkeypatch.setattr(tasks, "read_app_settings", lambda: AppSettings.model_construct(run_timeout_s=60))
+
+    def fake_watchdog(fn, progress, timeout_s):
+        seen["deadline"] = timeout_s
+        return fn()
+
+    def capture(path, llm, *, options=None, on_progress=None, document_name=None):
+        seen["timeout"] = llm.timeout_s
+        return SAMPLE
+
+    monkeypatch.setattr(tasks, "run_with_watchdog", fake_watchdog)
+    monkeypatch.setattr(req_core, "validate_document", capture)
+    try:
+        assert run_validation.delay(make_run(svc)).get() == "done"
+        assert seen == {"timeout": 900.0, "deadline": 1080}
+    finally:
+        with SessionLocal() as db:
+            db.get(ProviderSetting, "gemini").timeout_s = None
+            db.commit()

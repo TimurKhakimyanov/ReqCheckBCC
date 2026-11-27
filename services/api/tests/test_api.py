@@ -71,9 +71,126 @@ async def test_providers(client):
     assert p["has_key"] and p["key_hint"] == "…7890" and p["default_model"] == "gemini-2.5-flash"
     assert secret not in (await client.get("/api/providers")).text
     r = await client.get("/api/providers/gemini/models")
-    assert r.json()["models"] == ["model-a", "model-b"]
+    assert r.json()["models"] == ["gemini-2.5-flash", "gemini-2.5-pro"] and r.json()["default_model_valid"] is True
     r = await client.put("/api/providers/nope", json={})
     assert r.status_code == 422
+
+
+async def test_settings(client, anon):
+    r = await client.get("/api/settings")
+    s = r.json()
+    assert s["default_provider"] == "gemini" and s["run_timeout_s"] == 1800 and s["embeddings_provider"] == "local"
+    assert s["embeddings_has_key"] is False and s["max_upload_mb"] == 25
+    assert (await anon.get("/api/settings")).status_code == 401
+
+    r = await client.put("/api/settings", json={"batch_size": 3, "concurrency": 2, "min_interval_s": 1.5,
+                                                "max_attempts": 2, "max_upload_mb": 1,
+                                                "embeddings_api_key": "emb-secret-123456"})
+    assert r.status_code == 200, r.text
+    s = r.json()
+    assert (s["batch_size"], s["concurrency"], s["min_interval_s"], s["max_attempts"]) == (3, 2, 1.5, 2)
+    assert s["embeddings_has_key"] and s["embeddings_key_hint"] == "…3456" and "emb-secret" not in r.text
+    assert (await client.put("/api/settings", json={"batch_size": 0})).status_code == 422
+    assert (await client.put("/api/settings", json={"embeddings_provider": "cohere"})).status_code == 422
+
+    # лимит загрузки — из настроек
+    assert (await anon.get("/api/health")).json()["limits"] == {"max_upload_mb": 1}
+    r = await client.post("/api/documents", files={"file": ("big.txt", b"x" * (1024 * 1024 + 10), "text/plain")})
+    assert r.status_code == 413
+    await client.put("/api/settings", json={"max_upload_mb": 25, "embeddings_api_key": ""})
+    assert (await client.get("/api/settings")).json()["embeddings_has_key"] is False
+
+
+async def test_provider_test_uses_unsaved_values(client):
+    calls = testing.CORE_CALLS
+    r = await client.post("/api/providers/openai/test", json={"api_key": "sk-unsaved-1"})
+    body = r.json()
+    assert body["ok"] is True and body["models"] == ["model-a", "model-b"], body
+    assert calls["complete"].api_key.get_secret_value() == "sk-unsaved-1"
+    assert calls["complete"].max_attempts == 1  # проверка без повторов
+    providers = {p["provider"]: p for p in (await client.get("/api/providers")).json()}
+    assert providers["openai"]["has_key"] is False  # значения из формы не сохраняются
+
+    r = await client.post("/api/providers/openai/test", json={"api_key": "bad-key"})
+    assert r.json()["ok"] is False and "401" in r.json()["error"] and r.json()["models"] == []
+    r = await client.post("/api/providers/openai/test")
+    assert r.json()["ok"] is False and "API-ключ" in r.json()["error"]
+
+
+async def test_openai_compatible_without_key(client):
+    r = await client.post("/api/providers/openai_compatible/test")
+    assert r.json()["ok"] is False and "base_url" in r.json()["error"]
+    providers = {p["provider"]: p for p in (await client.get("/api/providers")).json()}
+    assert providers["openai_compatible"]["base_url"] is None  # без адреса по умолчанию
+
+    url = "http://vllm.example.local:8000/v1"
+    r = await client.post("/api/providers/openai_compatible/test", json={"base_url": url})
+    body = r.json()
+    assert body["ok"] is True and body["models"] == ["model-a", "model-b"]
+    cfg = testing.CORE_CALLS["complete"]
+    assert cfg.base_url == url and cfg.api_key is None and cfg.model == "model-a"
+
+    await client.put("/api/providers/openai_compatible", json={"base_url": url})
+    # доп. поля запроса: объект, строка с JSON-объектом; не-объект — 422
+    no_think, think = {"chat_template_kwargs": {"enable_thinking": False}}, {"chat_template_kwargs": {"enable_thinking": True}}
+    r = await client.put("/api/providers/openai_compatible", json={
+        "extra_body": no_think, "extra_body_set_review": '{"chat_template_kwargs": {"enable_thinking": true}}',
+        "max_output_tokens": 48000})
+    p = r.json()
+    assert r.status_code == 200 and p["extra_body"] == no_think and p["extra_body_set_review"] == think, p
+    assert p["max_output_tokens"] == 48000
+    for bad in ("{not json", [1, 2], "[1]", 5):
+        r = await client.put("/api/providers/openai_compatible", json={"extra_body": bad})
+        assert r.status_code == 422, bad
+    assert (await client.put("/api/providers/openai_compatible", json={"max_output_tokens": 0})).status_code == 422
+    r = await client.post("/api/providers/openai_compatible/test")
+    cfg = testing.CORE_CALLS["complete"]
+    assert r.json()["ok"] and cfg.extra_body == no_think and cfg.extra_body_set_review == think
+    assert cfg.max_output_tokens == 48000
+    # таймаут одного запроса — по провайдеру, в т. ч. для проверки ключа
+    r = await client.put("/api/providers/openai_compatible", json={"timeout_s": 900})
+    assert r.json()["timeout_s"] == 900
+    assert (await client.put("/api/providers/openai_compatible", json={"timeout_s": 5})).status_code == 422
+    await client.post("/api/providers/openai_compatible/test")
+    assert testing.CORE_CALLS["complete"].timeout_s == 900
+    await client.post("/api/providers/openai_compatible/test", json={"extra_body": None})
+    assert testing.CORE_CALLS["complete"].extra_body is None  # несохранённое значение из формы
+    r = await client.get("/api/providers/openai_compatible/models")
+    assert r.json()["models"] == ["model-a", "model-b"] and r.json()["error"] is None
+    assert testing.CORE_CALLS["list_models"].base_url == url
+    doc = (await client.post("/api/documents", files={"file": ("tmp.md", b"# x", "text/markdown")})).json()
+    r = await client.post("/api/runs", json={"document_id": doc["id"], "provider": "openai_compatible",
+                                             "model": "model-a", "options": {"batch_size": 10}})
+    assert r.status_code == 202, r.text
+    assert r.json()["options"]["batch_size"] == 10 and r.json()["options"]["concurrency"] == 2
+    assert (await client.delete(f"/api/documents/{doc['id']}")).status_code == 204
+
+
+async def test_stale_default_model(client):
+    """Устаревшая модель по умолчанию: проверка идёт на живой модели, а админке приходит предупреждение."""
+    from app.providers import reset_stale_default_models
+
+    await client.put("/api/providers/anthropic", json={"api_key": "sk-ant-test-123456", "default_model": "claude-opus-4-1"})
+    r = (await client.post("/api/providers/anthropic/test")).json()
+    assert r["ok"] is True and r["model"] == "claude-sonnet-4-5", r
+    assert r["default_model_valid"] is False and "claude-opus-4-1" in r["warning"]
+    assert testing.CORE_CALLS["complete"].model == "claude-sonnet-4-5"
+    m = (await client.get("/api/providers/anthropic/models")).json()
+    assert m["default_model"] == "claude-opus-4-1" and m["default_model_valid"] is False and m["warning"]
+
+    # список не получен (неверный ключ) — модель по умолчанию не трогаем
+    await client.put("/api/providers/openai", json={"api_key": "bad-key", "default_model": "gpt-x"})
+    reset = await asyncio.to_thread(reset_stale_default_models, testing.fake_list_models)
+    assert reset == [("anthropic", "claude-opus-4-1")]
+    providers = {p["provider"]: p for p in (await client.get("/api/providers")).json()}
+    assert providers["anthropic"]["default_model"] is None and providers["openai"]["default_model"] == "gpt-x"
+    assert providers["gemini"]["default_model"] == "gemini-2.5-flash"  # есть в списке — осталась
+    m = (await client.get("/api/providers/anthropic/models")).json()
+    assert m["default_model_valid"] is None and m["warning"] is None
+    r = (await client.post("/api/providers/anthropic/test")).json()
+    assert r["ok"] and r["model"] == "claude-sonnet-4-5" and r["default_model_valid"] is None
+    await client.put("/api/providers/openai", json={"api_key": "", "default_model": ""})
+    await client.put("/api/providers/anthropic", json={"api_key": ""})
 
 
 async def test_upload_document(client):
@@ -107,6 +224,7 @@ async def test_create_run_and_errors(client, services):
     run = r.json()
     assert run["status"] == "queued" and run["document_name"] == "requirements.md"
     assert run["options"]["verify_pass"] is True
+    assert run["options"]["batch_size"] == 3 and run["options"]["concurrency"] == 2  # из /settings
     assert services.enqueued[-1] == run["id"]
     state["run"] = run
 
@@ -236,6 +354,22 @@ async def test_knowledge(client, services):
     assert (await client.post("/api/knowledge", json={"title": "x"})).status_code == 422
 
 
+async def test_embeddings_change_reindexes(client, services):
+    """Смена модели эмбеддингов в настройках → коллекции пересоздаются, всё индексируется заново."""
+    from app.vectors import REQUIREMENTS
+
+    r = await client.put("/api/settings", json={"embeddings_model": "intfloat/multilingual-e5-base"})
+    assert r.json()["embeddings_model"] == "intfloat/multilingual-e5-base"
+    assert REQUIREMENTS in services.qdrant.get_collections().model_dump_json()
+    hits = (await client.get("/api/search", params={"q": SAMPLE["findings"][0]["title"], "kind": "finding"})).json()
+    assert hits and hits[0]["finding_id"] == SAMPLE["findings"][0]["id"]
+    items = (await client.get("/api/knowledge")).json()
+    assert items and all(i["status"] == "ready" for i in items)
+    r = await client.put("/api/settings", json={"embeddings_model": None})
+    assert r.json()["embeddings_model"] is None
+    actions = [a["action"] for a in (await client.get("/api/audit")).json()["items"]]
+    assert "settings_updated" in actions
+
 def test_reindex_into_empty_qdrant():
     """Пустой Qdrant (или смена модели эмбеддингов) → api при старте переиндексирует базу знаний и отчёты."""
     from app.knowledge import sync_vectors
@@ -302,3 +436,12 @@ async def test_logout(anon):
     assert (await anon.get("/api/auth/me")).status_code == 200
     assert (await anon.post("/api/auth/logout")).status_code == 204
     assert (await anon.get("/api/auth/me")).status_code == 401
+
+
+def test_external_network_is_blocked():
+    import socket
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="external network"):
+        socket.create_connection(("8.8.8.8", 443), timeout=1)

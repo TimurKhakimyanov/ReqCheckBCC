@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
-import os
 import threading
+from pathlib import Path
 from typing import Literal, Protocol
 
 import httpx
@@ -141,21 +141,41 @@ class HashBackend:
         return out
 
 
-def build_backend(env: dict[str, str] | None = None) -> Backend:
-    env = dict(os.environ if env is None else env)
-    provider = env.get("EMBEDDINGS_PROVIDER", "local").strip().lower() or "local"
-    model = env.get("EMBEDDINGS_MODEL", "").strip()
-    key = env.get("EMBEDDINGS_API_KEY", "").strip()
-    if provider == "local":
-        return LocalBackend(model or DEFAULT_LOCAL_MODEL, int(env.get("EMBEDDINGS_BATCH_SIZE", "32")))
-    if model == DEFAULT_LOCAL_MODEL:
-        model = ""  # значение по умолчанию из .env относится к локальной модели
-    if provider == "gemini":
-        return GeminiBackend(model or "gemini-embedding-001", key or env.get("GEMINI_API_KEY", ""),
-                             int(env.get("EMBEDDINGS_DIM", "768")))
-    if provider == "openai":
-        return OpenAIBackend(model or "text-embedding-3-small", key or env.get("OPENAI_API_KEY", ""),
-                             env.get("EMBEDDINGS_BASE_URL") or "https://api.openai.com/v1")
-    if provider == "hash":
-        return HashBackend(int(env.get("EMBEDDINGS_DIM", "64")))
-    raise RuntimeError(f"Unknown EMBEDDINGS_PROVIDER={provider!r}: use local, gemini or openai")
+MODEL_FILE = Path("/models/MODEL")  # имя локальной модели, вшитой при сборке образа (аргумент EMBEDDINGS_MODEL)
+REMOTE_DEFAULT_MODELS = {"gemini": "gemini-embedding-001", "openai": "text-embedding-3-small"}
+_remote_cache: dict[tuple, Backend] = {}
+_remote_lock = threading.Lock()
+
+
+def local_model_name() -> str:
+    try:
+        return MODEL_FILE.read_text(encoding="utf-8").strip() or DEFAULT_LOCAL_MODEL
+    except OSError:
+        return DEFAULT_LOCAL_MODEL
+
+
+def build_local() -> Backend:
+    return LocalBackend(local_model_name())
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def remote_backend(provider: str, model: str | None, api_key: str | None, dim: int | None = None) -> Backend:
+    """Внешний провайдер с ключом из запроса (ключи хранит api в БД; embedder их не сохраняет)."""
+    if provider not in REMOTE_DEFAULT_MODELS:
+        raise ConfigError(f"Unknown embeddings provider {provider!r}: use local, gemini or openai")
+    if not api_key:
+        raise ConfigError(f"Embeddings provider {provider} requires api_key (set it in the admin settings)")
+    model = model or REMOTE_DEFAULT_MODELS[provider]
+    key = (provider, model, hashlib.sha256(api_key.encode()).hexdigest(), dim)
+    with _remote_lock:
+        backend = _remote_cache.get(key)
+        if backend is None:
+            backend = (GeminiBackend(model, api_key, dim or 768) if provider == "gemini"
+                       else OpenAIBackend(model, api_key))
+            if len(_remote_cache) > 16:
+                _remote_cache.clear()
+            _remote_cache[key] = backend
+    return backend

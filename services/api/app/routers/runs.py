@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
 from starlette.concurrency import run_in_threadpool
 
+from ..app_settings import get_app_settings
 from ..audit import audit
 from ..config import get_settings
 from ..db import SessionLocal
@@ -68,7 +69,11 @@ def create_run(body: RunCreate, request: Request, user: CurrentUser, db: DB, svc
         cfg = build_provider_config(db, provider, body.model)
     except ProviderNotConfigured as e:
         raise ApiError(400, "provider_not_configured", str(e)) from e
-    options = (body.options or ValidationOptions()).model_dump(mode="json")
+    # batch_size/concurrency из настроек админки, если клиент не задал их явно
+    requested = body.options or ValidationOptions()
+    settings = get_app_settings(db)
+    defaults = {k: getattr(settings, k) for k in ("batch_size", "concurrency") if k not in requested.model_fields_set}
+    options = requested.model_copy(update=defaults).model_dump(mode="json")
     run = Run(id=uuid.uuid4(), document_id=doc.id, status=RunStage.QUEUED.value, stage=RunStage.QUEUED.value,
               progress=0.0, message="В очереди", provider=provider, model=cfg.model, options=options)
     db.add(run)

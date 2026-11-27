@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, Field, field_validator
 from req_contracts import Finding, ProviderName, RunStage, Severity, Summary, Usage, ValidationOptions
 
 ReviewStatus = Literal["open", "accepted", "false_positive", "fixed"]
@@ -59,25 +60,69 @@ class ProviderOut(BaseModel):
     key_hint: str | None
     base_url: str | None
     default_model: str | None
+    extra_body: dict[str, Any] | None = None
+    extra_body_set_review: dict[str, Any] | None = None
+    max_output_tokens: int | None = None
+    timeout_s: int | None = None
     updated_at: datetime | None
 
 
+def _json_object(value: Any) -> Any:
+    """Принимает объект или строку с JSON-объектом (из текстового поля формы)."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else None
+        except json.JSONDecodeError as e:
+            raise ValueError(f"невалидный JSON: {e.msg}") from e
+    if value is not None and not isinstance(value, dict):
+        raise ValueError("ожидается JSON-объект {...}")
+    return value
+
+
+JsonObject = Annotated[dict[str, Any], BeforeValidator(_json_object)]
+
+
 class ProviderUpdate(BaseModel):
+    """Передаются только меняемые поля. Для extra_body, extra_body_set_review, max_output_tokens null — сбросить."""
+
     api_key: str | None = Field(default=None, description="Пустая строка — удалить ключ")
     base_url: str | None = None
     enabled: bool | None = None
     default_model: str | None = None
+    extra_body: JsonObject | None = Field(
+        default=None, description='Доп. поля тела запроса, напр. {"chat_template_kwargs": {"enable_thinking": false}}')
+    extra_body_set_review: JsonObject | None = Field(
+        default=None, description="extra_body для проверки набора требований (None — как extra_body)")
+    max_output_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
+    timeout_s: int | None = Field(default=None, ge=10, le=3600,
+                                  description="Таймаут одного запроса к модели, с (null — 180 с по умолчанию ядра)")
+
+
+class ProviderTestIn(BaseModel):
+    """Несохранённые значения из формы; проверяются поверх сохранённых и не записываются."""
+
+    api_key: str | None = None
+    base_url: str | None = None
+    extra_body: JsonObject | None = None
 
 
 class ProviderTestOut(BaseModel):
     ok: bool
     latency_ms: int
     error: str | None = None
+    models: list[str] = Field(default_factory=list, description="Модели, доступные с этими ключом и адресом")
+    model: str | None = Field(default=None, description="Модель, на которой выполнена проверка")
+    default_model_valid: bool | None = Field(
+        default=None, description="Есть ли модель по умолчанию в списке провайдера (null — не задана или список не получен)")
+    warning: str | None = None
 
 
 class ModelsOut(BaseModel):
     models: list[str]
     error: str | None = None
+    default_model: str | None = None
+    default_model_valid: bool | None = None
+    warning: str | None = None
 
 
 # --- documents & runs ---

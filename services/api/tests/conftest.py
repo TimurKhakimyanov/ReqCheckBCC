@@ -9,6 +9,7 @@ import req_core  # noqa: E402
 from app import testing  # noqa: E402
 
 testing.prepare_test_database("api_test")
+testing.block_external_network()  # тесты не ходят во внешнюю сеть (LLM-провайдеры и т. п.)
 
 from app.services import set_services  # noqa: E402
 from asgi_lifespan import LifespanManager  # noqa: E402
@@ -23,7 +24,8 @@ def mock_core():
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(req_core, "answer_question", testing.fake_answer_question)
         mp.setattr(req_core, "render_report", testing.fake_render_report)
-        mp.setattr(req_core, "list_models", lambda cfg: ["model-b", "model-a"])
+        mp.setattr(req_core, "list_models", testing.fake_list_models)
+        mp.setattr(req_core, "get_llm", testing.fake_get_llm)
         yield
 
 

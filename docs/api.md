@@ -20,12 +20,50 @@ FastAPI публикует полный OpenAPI на `/api/openapi.json` — о�
 ## Провайдеры LLM (кабинет)
 | Метод | Путь | Тело / ответ |
 | :--- | :--- | :--- |
-| GET | `/providers` | → `[{provider, enabled, has_key, key_hint: "…a1b2", base_url, default_model, updated_at}]` для `gemini, openai, anthropic, openai_compatible` |
-| PUT | `/providers/{provider}` | `{api_key?, base_url?, enabled?, default_model?}` → объект провайдера. `api_key: ""` — удалить ключ |
-| POST | `/providers/{provider}/test` | → `{ok, latency_ms, error?}` (короткий запрос к модели) |
-| GET | `/providers/{provider}/models` | → `{models: [string]}` |
+| GET | `/providers` | → `[{provider, enabled, has_key, key_hint: "…a1b2", base_url, default_model, extra_body, extra_body_set_review, max_output_tokens, timeout_s, updated_at}]` для `gemini, openai, anthropic, openai_compatible` |
+| PUT | `/providers/{provider}` | `{api_key?, base_url?, enabled?, default_model?, extra_body?, extra_body_set_review?, max_output_tokens?, timeout_s?}` → объект провайдера. `api_key: ""` — удалить ключ; `null` в `extra_body*`/`max_output_tokens`/`timeout_s` — сбросить |
+| POST | `/providers/{provider}/test` | необязательное тело `{api_key?, base_url?, extra_body?}` — несохранённые значения из формы поверх сохранённых (не записываются) → `{ok, latency_ms, error?, models: [string], model, default_model_valid, warning?}`: живой список моделей и короткий запрос к модели — к модели по умолчанию, если она есть в списке, иначе к подходящей из списка (`model` — на какой проверено). `default_model_valid: false` и `warning` — модель по умолчанию устарела у провайдера (ключ при этом рабочий, `ok: true`); `null` — модель не задана или список не получен |
+| GET | `/providers/{provider}/models` | → `{models: [string], error?, default_model, default_model_valid, warning?}` — живой список через ядро с сохранёнными ключом и адресом; при ошибке — подсказки и текст `error` (`default_model_valid: null`) |
 
-Ключ никогда не возвращается целиком.
+Ключ никогда не возвращается целиком. При старте api проверяет сохранённые модели по умолчанию (в карточке провайдера и в `/settings`)
+и обнуляет те, которых нет в живом списке провайдера; если список получить не удалось, ничего не меняется (в аудите —
+`default_model_reset`). `openai_compatible` (vLLM, Ollama, LM Studio) считается настроенным, если задан
+`base_url` (например `http://vllm.example.local:8000/v1`); ключ необязателен. Адреса по умолчанию нет.
+
+Доп. параметры запроса к модели (передаются ядру в `ProviderConfig`, в том числе в `test`):
+- `extra_body` — JSON-объект, добавляемый в тело запроса OpenAI-совместимого сервера. Например, для vLLM-модели с
+  рассуждениями: `{"chat_template_kwargs": {"enable_thinking": false}}` — без него проверка ключа и прогон идут минутами.
+- `extra_body_set_review` — то же для проверки набора требований (поиск противоречий), например
+  `{"chat_template_kwargs": {"enable_thinking": true}}`; `null` — как `extra_body`.
+- `max_output_tokens` — лимит ответа; `null` — ядро выбирает с запасом.
+- `timeout_s` — таймаут одного запроса к модели, с (10…3600; `null` — 180 с). Модели с рассуждениями на проверке набора
+  отвечают 3–5 минут — ставьте 900. Используется и в `test`. Общий таймаут прогона (`run_timeout_s` в `/settings`)
+  воркер автоматически увеличивает до `1.2 × timeout_s`, если он короче.
+
+`extra_body*` принимаются как объект или строка с JSON-объектом; иначе `422`. Параллельность запросов — глобальная
+настройка `concurrency` в `/settings`.
+
+## Настройки приложения (кабинет)
+Всё про ИИ задаётся здесь, а не в `.env`: api и worker не читают из окружения ключи, модели и параметры LLM/эмбеддингов.
+
+| Метод | Путь | Тело / ответ |
+| :--- | :--- | :--- |
+| GET | `/settings` | → `Settings` |
+| PUT | `/settings` | частичный `Settings` (только меняемые поля) + `embeddings_api_key?` (`""` — удалить) → `Settings` |
+
+`Settings = {default_provider, default_model?, run_timeout_s, min_interval_s, max_attempts, batch_size, concurrency,
+embeddings_provider: local|gemini|openai, embeddings_model?, embeddings_dim?, embeddings_has_key, embeddings_key_hint?,
+max_upload_mb, session_ttl_hours, updated_at}`.
+
+| Поле | По умолчанию | Смысл |
+| :--- | :--- | :--- |
+| `default_provider`, `default_model` | `gemini`, — | Провайдер и модель для `POST /runs` без явных `provider`/`model` (если провайдер не настроен — первый настроенный) |
+| `run_timeout_s` | 1800 (60…21600) | Общий таймаут прогона |
+| `min_interval_s`, `max_attempts` | 0, 6 | Пауза между вызовами LLM и число попыток (→ `ProviderConfig`) |
+| `batch_size`, `concurrency` | 6, 1 | Требований в запросе и параллельных запросов (→ `ValidationOptions`, если клиент не задал их в `options`) |
+| `embeddings_provider`, `embeddings_model`, `embeddings_dim` | `local`, —, — | Эмбеддинги для поиска и базы знаний. `local` — модель внутри `embedder`; `gemini`/`openai` — по ключу из настроек. Смена — коллекции Qdrant пересоздаются, всё индексируется заново в фоне |
+| `max_upload_mb` | 25 | Лимит загрузки (отдаётся и в `GET /health` → `limits`) |
+| `session_ttl_hours` | 12 | Срок сессии после входа |
 
 ## Документы
 | Метод | Путь | Тело / ответ |
