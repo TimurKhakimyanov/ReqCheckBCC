@@ -131,6 +131,24 @@ async def test_openai_compatible_without_key(client):
     assert cfg.base_url == url and cfg.api_key is None and cfg.model == "model-a"
 
     await client.put("/api/providers/openai_compatible", json={"base_url": url})
+    # доп. поля запроса: объект, строка с JSON-объектом; не-объект — 422
+    no_think, think = {"chat_template_kwargs": {"enable_thinking": False}}, {"chat_template_kwargs": {"enable_thinking": True}}
+    r = await client.put("/api/providers/openai_compatible", json={
+        "extra_body": no_think, "extra_body_set_review": '{"chat_template_kwargs": {"enable_thinking": true}}',
+        "max_output_tokens": 48000})
+    p = r.json()
+    assert r.status_code == 200 and p["extra_body"] == no_think and p["extra_body_set_review"] == think, p
+    assert p["max_output_tokens"] == 48000
+    for bad in ("{not json", [1, 2], "[1]", 5):
+        r = await client.put("/api/providers/openai_compatible", json={"extra_body": bad})
+        assert r.status_code == 422, bad
+    assert (await client.put("/api/providers/openai_compatible", json={"max_output_tokens": 0})).status_code == 422
+    r = await client.post("/api/providers/openai_compatible/test")
+    cfg = testing.CORE_CALLS["complete"]
+    assert r.json()["ok"] and cfg.extra_body == no_think and cfg.extra_body_set_review == think
+    assert cfg.max_output_tokens == 48000
+    await client.post("/api/providers/openai_compatible/test", json={"extra_body": None})
+    assert testing.CORE_CALLS["complete"].extra_body is None  # несохранённое значение из формы
     r = await client.get("/api/providers/openai_compatible/models")
     assert r.json() == {"models": ["model-a", "model-b"], "error": None}
     assert testing.CORE_CALLS["list_models"].base_url == url

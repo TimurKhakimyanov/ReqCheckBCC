@@ -28,7 +28,8 @@ router = APIRouter(prefix="/providers", tags=["providers"])
 def provider_out(row: ProviderSetting) -> ProviderOut:
     return ProviderOut(provider=ProviderName(row.provider), enabled=row.enabled, has_key=bool(row.api_key_encrypted),
                        key_hint=row.key_hint, base_url=row.base_url, default_model=row.default_model,
-                       updated_at=row.updated_at)
+                       extra_body=row.extra_body, extra_body_set_review=row.extra_body_set_review,
+                       max_output_tokens=row.max_output_tokens, updated_at=row.updated_at)
 
 
 @router.get("", response_model=list[ProviderOut])
@@ -55,6 +56,10 @@ def update_provider(provider: ProviderName, body: ProviderUpdate, request: Reque
     if body.default_model is not None:
         row.default_model = body.default_model.strip() or None
         changed.append("default_model")
+    for field in ("extra_body", "extra_body_set_review", "max_output_tokens"):
+        if field in body.model_fields_set:  # null — сбросить
+            setattr(row, field, getattr(body, field))
+            changed.append(field)
     audit(db, user.username, "provider_updated", provider.value, {"fields": changed}, request, commit=False)
     db.commit()
     return provider_out(row)
@@ -86,7 +91,8 @@ async def _live_models(cfg: ProviderConfig) -> tuple[list[str], str | None]:
 async def test_provider(provider: ProviderName, _: CurrentUser, db: DB,
                         body: ProviderTestIn | None = None) -> ProviderTestOut:
     """Проверка ключа/адреса: список моделей и короткий запрос к модели. Значения из тела не сохраняются."""
-    overrides = Overrides(api_key=body.api_key, base_url=body.base_url) if body else None
+    overrides = Overrides(api_key=body.api_key, base_url=body.base_url, extra_body=body.extra_body,
+                          extra_body_set=body is not None and "extra_body" in body.model_fields_set) if body else None
     try:
         cfg = await run_in_threadpool(lambda: build_provider_config(
             db, provider.value, None, require_enabled=False, overrides=overrides, require_model=False))

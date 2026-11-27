@@ -257,3 +257,28 @@ def test_llm_pacing_comes_from_admin_settings(svc, monkeypatch):
     with SessionLocal() as db:
         load_row(db).data = AppSettings().model_dump(mode="json")
         db.commit()
+
+
+def test_provider_request_options_reach_core(svc, monkeypatch):
+    """extra_body, extra_body_set_review и max_output_tokens из настроек провайдера попадают в ProviderConfig."""
+    no_think = {"chat_template_kwargs": {"enable_thinking": False}}
+    with SessionLocal() as db:
+        row = db.get(ProviderSetting, "gemini")
+        row.extra_body, row.extra_body_set_review, row.max_output_tokens = no_think, {"x": 1}, 48000
+        db.commit()
+    seen = {}
+
+    def capture(path, llm, *, options=None, on_progress=None, document_name=None):
+        seen["cfg"] = llm
+        return SAMPLE
+
+    monkeypatch.setattr(req_core, "validate_document", capture)
+    try:
+        assert run_validation.delay(make_run(svc)).get() == "done"
+        cfg = seen["cfg"]
+        assert cfg.extra_body == no_think and cfg.extra_body_set_review == {"x": 1} and cfg.max_output_tokens == 48000
+    finally:
+        with SessionLocal() as db:
+            row = db.get(ProviderSetting, "gemini")
+            row.extra_body = row.extra_body_set_review = row.max_output_tokens = None
+            db.commit()

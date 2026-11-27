@@ -52,6 +52,10 @@ class ProviderSetting(Base):
     key_hint: Mapped[str | None] = mapped_column(String(16), nullable=True)
     base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     default_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Доп. поля тела запроса к модели (OpenAI-совместимые серверы) и лимит ответа → ProviderConfig
+    extra_body: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    extra_body_set_review: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 

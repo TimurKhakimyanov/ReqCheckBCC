@@ -38,6 +38,8 @@ class Overrides:
 
     api_key: str | None = None
     base_url: str | None = None
+    extra_body: dict | None = None
+    extra_body_set: bool = False  # extra_body передан явно (в т. ч. null — проверить без него)
 
 
 def get_or_create(db: Session, provider: str) -> ProviderSetting:
@@ -141,4 +143,7 @@ def build_provider_config(db: Session, provider: str, model: str | None = None, 
         base_url=base_url,
         min_interval_s=settings.min_interval_s,
         max_attempts=settings.max_attempts,
+        max_output_tokens=row.max_output_tokens,
+        extra_body=overrides.extra_body if overrides and overrides.extra_body_set else row.extra_body,
+        extra_body_set_review=row.extra_body_set_review,
     )
