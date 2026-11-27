@@ -20,21 +20,19 @@
    ```
 3. **Healthcheck и лимиты** для `api` (`GET /api/health`), `worker` (`celery inspect ping` или файл-сердцебиение),
    `embedder`, `web` — по аналогии с инфраструктурой, плюс `deploy.resources.limits`.
-4. **Метрики воркера.** Переменные окружения `worker`:
-   ```yaml
-   WORKER_METRICS_PORT: "9101"
-   PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
-   ```
-   и HTTP-сервер метрик на `:9101` (см. docs/monitoring.md, раздел «Воркер»).
-5. **Celery-события не нужны**: длину очереди считает redis-exporter по ключу `celery` в db0. Если очередь
-   называется иначе или используется не db0 — сообщите, поправлю `REDIS_EXPORTER_CHECK_SINGLE_KEYS`.
+4. ~~Метрики воркера на `:9101`~~ — сделано в `claude/backend-4accf6` (`WORKER_METRICS_PORT=9101`, пул потоков,
+   multiprocess-режим не нужен).
+5. ~~Имя очереди~~ — сверено: очередь `reqcheck`, Redis db0; redis-exporter настроен на `db0=reqcheck`.
 
 ## Бэкенд: код
 
-1. `api` отдаёт `GET /metrics` (без авторизации, но **web не должен проксировать `/metrics` наружу**) с метриками
-   `reqcheck_http_*`, `reqcheck_sse_connections` и `reqcheck_llm_*` для чата.
-2. `worker` отдаёт `reqcheck_runs_*`, `reqcheck_run_stage_duration_seconds`, `reqcheck_findings_total`, `reqcheck_llm_*`.
-3. Логи — JSON в stdout с полем `level` (Alloy разметит уровень для Loki).
+Метрики реализованы, мониторинг подстроен под фактические имена (сверка 2026-11-27, см. docs/monitoring.md).
+Пожелания, не блокирующие:
+1. Латентность и исход каждого вызова LLM (`reqcheck_llm_request_duration_seconds{provider,model}`,
+   `reqcheck_llm_requests_total{provider,model,outcome}`) — сейчас видно только итоговые вызовы и токены за прогон.
+2. Длительность стадий конвейера (`reqcheck_run_stage_duration_seconds{stage}`).
+3. Токены чата (`reqcheck_llm_tokens_total` с теми же метками из `api`).
+4. Логи — JSON в stdout с полем `level` (Alloy разметит уровень для Loki).
 
 ## Веб
 

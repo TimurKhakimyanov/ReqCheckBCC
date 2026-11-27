@@ -34,47 +34,61 @@ Alloy и cAdvisor подключают `docker.sock` и `/var/lib/docker` тол
 Пока сервис приложения не отдаёт `/metrics`, его цель в Prometheus будет `down` — дашборд при этом работает,
 панели приложения просто пустые.
 
-## Контракт метрик приложения
+## Метрики приложения
 
-Все метрики приложения начинаются с `reqcheck_`. Библиотека — `prometheus_client`. Метки — только из
-перечисленных ниже, с ограниченным набором значений (никаких `run_id`, `user`, полного URL).
+Метрики реализованы в ветке бэкенда (`services/api/app/metrics.py`, `services/worker/worker/metrics.py`,
+`services/embedder/embedder/main.py`); источник правды — код, таблица ниже — сверка на 2026-11-27.
+Все имена начинаются с `reqcheck_`, библиотека `prometheus_client`. `/metrics` и `/livez` живут в корне сервиса
+(не под `/api`) и через `web` наружу не проксируются.
 
 ### API (`api:8000/metrics`)
 
 | Метрика | Тип | Метки | Смысл |
 | :--- | :--- | :--- | :--- |
-| `reqcheck_http_requests_total` | counter | `method`, `route`, `status` | Все HTTP-запросы. `route` — шаблон пути FastAPI (`/api/runs/{run_id}`), `status` — числовой код (`200`, `404`, `500`). |
-| `reqcheck_http_request_duration_seconds` | histogram | `method`, `route` | Время ответа. **SSE-эндпоинты не включать** (они длятся минутами). Бакеты: `0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30`. |
-| `reqcheck_sse_connections` | gauge | `stream` = `run_events` \| `chat` | Открытые SSE-потоки. |
-
-Сам `/metrics` и `/api/health` в счётчики не включать.
+| `reqcheck_http_requests_total` | counter | `method`, `route`, `status` | HTTP-запросы. `route` — шаблон пути FastAPI (`/api/runs/{run_id}`, иначе `unmatched`), `status` — числовой код. |
+| `reqcheck_http_request_duration_seconds` | histogram | `method`, `route` | Время ответа. Бакеты `0.01 … 30` с. |
+| `reqcheck_sse_connections` | gauge | `kind` = `progress` \| `chat` | Открытые SSE-потоки. |
+| `reqcheck_runs_created_total` | counter | `provider` | Поставленные в очередь прогоны. |
+| `reqcheck_documents_uploaded_total` | counter | `format` | Загруженные документы. |
+| `reqcheck_logins_total` | counter | `result` = `ok` \| `failed` | Попытки входа. |
+| `reqcheck_chat_messages_total` | counter | `provider`, `result` = `ok` \| `error` | Вопросы в чате по отчёту. |
 
 ### Воркер (`worker:9101/metrics`)
 
-Celery работает в режиме prefork, поэтому метрики собираются в multiprocess-режиме `prometheus_client`:
-`PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus` (каталог очищается при старте воркера), HTTP-сервер метрик
-поднимается в главном процессе (`MultiProcessCollector`) на порту `WORKER_METRICS_PORT=9101`.
-Для gauge — `multiprocess_mode="livesum"`.
+Пул Celery — потоки (`worker_pool=threads`), поэтому обычный `start_http_server(9101)` без multiprocess-режима.
 
 | Метрика | Тип | Метки | Смысл |
 | :--- | :--- | :--- | :--- |
-| `reqcheck_runs_total` | counter | `status` = `done` \| `failed` \| `cancelled`, `provider` | Завершённые прогоны. |
-| `reqcheck_run_duration_seconds` | histogram | `status`, `provider` | Длительность прогона от старта задачи до финала. Бакеты: `10, 30, 60, 120, 300, 600, 1200, 1800, 3600`. |
-| `reqcheck_run_stage_duration_seconds` | histogram | `stage` | Длительность стадии конвейера (значения `stage` — из `req_contracts.events`). Бакеты как выше плюс `1, 5`. |
-| `reqcheck_runs_in_progress` | gauge (livesum) | — | Прогоны, выполняющиеся сейчас. |
-| `reqcheck_findings_total` | counter | `severity` | Найденные дефекты (по завершённым прогонам). |
-| `reqcheck_llm_requests_total` | counter | `provider`, `model`, `outcome` = `ok` \| `error` \| `retry` | Вызовы LLM. `retry` — неудачная попытка, после которой будет повтор. |
-| `reqcheck_llm_request_duration_seconds` | histogram | `provider`, `model` | Время одного вызова LLM. Бакеты: `0.5, 1, 2, 5, 10, 20, 30, 60, 120, 180`. |
-| `reqcheck_llm_tokens_total` | counter | `provider`, `model`, `type` = `input` \| `output` | Токены по данным `usage` провайдера. |
+| `reqcheck_worker_runs_total` | counter | `status` = `done` \| `failed` \| `cancelled`, `provider` | Завершённые прогоны. |
+| `reqcheck_worker_run_duration_seconds` | histogram | `status` | Длительность прогона. Бакеты `10, 30, 60, 120, 300, 600, 1200, 1800, 3600` с. |
+| `reqcheck_worker_runs_in_progress` | gauge | — | Прогоны, выполняющиеся сейчас. |
+| `reqcheck_llm_calls_total` | counter | `provider`, `model` | Вызовы LLM за прогоны. |
+| `reqcheck_llm_tokens_total` | counter | `provider`, `model`, `kind` = `prompt` \| `completion` | Токены по `usage` провайдера. |
+| `reqcheck_llm_cost_usd_total` | counter | `provider`, `model` | Оценка стоимости, USD. |
+| `reqcheck_findings_total` | counter | `severity` = `critical` \| `major` \| `minor` | Найденные дефекты. |
 
-Чат по отчёту вызывает LLM из API, поэтому `reqcheck_llm_*` с теми же именами и метками отдаёт и `api`
-(дашборд суммирует по всем целям).
+LLM-метрики воркер добавляет **одним шагом по завершении прогона**, поэтому графики «в минуту» ступенчатые;
+итоги за период (`increase(...[$__range])`) точные. Токены чата сейчас не считаются.
+
+### Embedder (`embedder:8001/metrics`)
+
+| Метрика | Тип | Метки | Смысл |
+| :--- | :--- | :--- | :--- |
+| `reqcheck_embedder_texts_total` | counter | `kind` = `query` \| `passage` | Тексты, переведённые в векторы. |
+| `reqcheck_embedder_request_seconds` | histogram | — | Время запроса `/embed`. |
+| `reqcheck_embedder_errors_total` | counter | — | Ошибки эмбеддинга. |
+
+### Чего нет (пожелания бэкенду, не блокирует)
+
+Латентность и исходы отдельных вызовов LLM (`reqcheck_llm_request_duration_seconds`, ошибки/повторы по провайдеру),
+длительность стадий конвейера, токены чата. Когда появятся — добавить панели в дашборд.
 
 ### Очередь Celery
 
-Отдельный экспортер не нужен: redis-exporter читает длину списка `celery` в db0
-(`REDIS_EXPORTER_CHECK_SINGLE_KEYS=db0=celery`) → метрика `redis_key_size{key="celery"}`.
-Если бэкенд переименует очередь или базу Redis, поправьте эту переменную в `compose.yaml` (сервис `redis-exporter`).
+Отдельный экспортер не нужен: бэкенд кладёт задачи в очередь `reqcheck` (`task_default_queue`), Redis db0
+(`REDIS_URL=redis://…/0`). redis-exporter читает длину этого списка (`REDIS_EXPORTER_CHECK_SINGLE_KEYS=db0=reqcheck`)
+→ метрика `redis_key_size{key="reqcheck"}`. Если бэкенд сменит очередь или базу — поправьте переменную
+в `compose.yaml` (сервис `redis-exporter`), дашборд и правило `CeleryQueueBacklog`.
 
 ### Логи
 
@@ -95,12 +109,13 @@ sum by (service) (count_over_time({level=~"error|critical"}[5m]))
 
 Открывается домашней страницей Grafana. Разделы: доступность целей; API (rps по статусу, доля 4xx/5xx,
 p95 по маршрутам); прогоны и очередь (итоги за период, p50/p95 длительности, очередь Celery и прогоны в
-работе, p95 стадий); LLM (токены за период и в минуту по моделям, исходы запросов, p95 латентности);
-ресурсы (CPU и память по сервисам, Postgres, Redis); логи (ошибки по сервисам и поток логов).
+работе, дефекты по критичности); LLM прогонов (токены за период и в минуту, вызовы, стоимость в USD);
+активность и поиск (загрузки и запуски, входы и чат, SSE-потоки, эмбеддинги); ресурсы (CPU и память по сервисам, Postgres, Redis); логи (ошибки по сервисам и поток логов).
 Дашборд хранится в git и при изменении в UI не сохраняется — правьте `reqcheck.json`.
 
 ## Оповещения
 
 `alerts.yml`: цель недоступна 2 мин, Postgres/Redis недоступны, >5% ответов API с 5xx, очередь Celery >20
-задач 10 мин, >20% ошибок LLM у провайдера, 3+ упавших прогона за 30 мин, Redis занял >90% maxmemory.
+задач 10 мин, 3+ упавших прогона за 30 мин, >20% ошибок чата у провайдера, >5 ошибок embedder за 10 мин,
+>20 неудачных входов за 10 мин, Redis занял >90% maxmemory.
 Доставка (почта, Telegram, Mattermost) — через Grafana Alerting → Contact points или Alertmanager (в бэклоге).

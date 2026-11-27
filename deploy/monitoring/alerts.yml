@@ -4,7 +4,7 @@ groups:
   - name: reqcheck
     rules:
       - alert: TargetDown
-        expr: up{job=~"api|worker|postgres|redis|qdrant|seaweedfs|loki"} == 0
+        expr: up{job=~"api|worker|embedder|postgres|redis|qdrant|seaweedfs|loki"} == 0
         for: 2m
         labels: { severity: critical }
         annotations:
@@ -34,26 +34,38 @@ groups:
           summary: "Больше 5% ответов API — ошибки 5xx"
 
       - alert: CeleryQueueBacklog
-        expr: max(redis_key_size{key="celery"}) > 20
+        expr: max(redis_key_size{key="reqcheck"}) > 20
         for: 10m
         labels: { severity: warning }
         annotations:
           summary: "В очереди Celery больше 20 задач 10 минут — не хватает воркеров или LLM тормозит"
 
-      - alert: LlmHighErrorRate
+      - alert: RunsFailing
+        expr: sum(increase(reqcheck_worker_runs_total{status="failed"}[30m])) >= 3
+        labels: { severity: warning }
+        annotations:
+          summary: "За 30 минут упало 3 и более прогона (причина — runs.error / логи worker)"
+
+      - alert: ChatHighErrorRate
         expr: |
-          sum by (provider) (rate(reqcheck_llm_requests_total{outcome="error"}[10m]))
-            / clamp_min(sum by (provider) (rate(reqcheck_llm_requests_total[10m])), 1e-9) > 0.2
+          sum by (provider) (rate(reqcheck_chat_messages_total{result="error"}[10m]))
+            / clamp_min(sum by (provider) (rate(reqcheck_chat_messages_total[10m])), 1e-9) > 0.2
         for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "Больше 20% запросов к LLM ({{ $labels.provider }}) заканчиваются ошибкой"
+          summary: "Больше 20% вопросов в чате ({{ $labels.provider }}) заканчиваются ошибкой LLM"
 
-      - alert: RunsFailing
-        expr: sum(increase(reqcheck_runs_total{status="failed"}[30m])) >= 3
+      - alert: EmbedderErrors
+        expr: sum(increase(reqcheck_embedder_errors_total[10m])) > 5
         labels: { severity: warning }
         annotations:
-          summary: "За 30 минут упало 3 и более прогона"
+          summary: "embedder вернул больше 5 ошибок за 10 минут — поиск и база знаний деградируют"
+
+      - alert: LoginFailuresSpike
+        expr: sum(increase(reqcheck_logins_total{result="failed"}[10m])) > 20
+        labels: { severity: warning }
+        annotations:
+          summary: "Больше 20 неудачных входов за 10 минут — возможен перебор пароля"
 
       - alert: RedisMemoryHigh
         expr: redis_memory_used_bytes / clamp_min(redis_memory_max_bytes, 1) > 0.9
