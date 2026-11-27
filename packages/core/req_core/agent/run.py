@@ -55,7 +55,7 @@ from req_contracts import (
 
 from ..text import QuoteLocator, SectionIndex, page_for, plural, shorten
 from . import guard, prompts
-from .agents import clarifier, extractor, finalizer, planner, verifier
+from .agents import clarifier, extractor, finalizer, planner, reviewers, verifier
 from .agents.common import Ctx
 from .config import AgentConfig
 from .criteria import INDIVIDUAL, SET
@@ -66,6 +66,8 @@ from .rules import Hint, run_rules
 from .textmatch import QuoteIndex
 
 log = logging.getLogger("req_core.agent")
+
+REFUSAL_PREFIX = "проверка набора (роль "  # предупреждение об отказе модели на ревью набора
 
 I_TO_CRITERION = {
     "I1": Criterion.NECESSARY, "I2": Criterion.IMPLEMENTATION_FREE, "I3": Criterion.UNAMBIGUOUS,
@@ -274,6 +276,16 @@ class Run:
             self.warnings.append(f"{name}: {shorten(re.sub(r'https?://\S+', '<url>', str(e)), 160)}")
             log.warning("Шаг «%s» не выполнен: %s", name, e)
 
+    def _refusal_warnings(self) -> None:
+        """Ревью набора, на которые модель ответила отказом, — в предупреждения отчёта и журнал прогона."""
+        refused = (self.ctx.meta.get("coverage") or {}).get("reviews_refused") or []
+        n_parts = len(reviewers.doc_parts(self.ctx)) if refused else 1
+        for key, part in refused:
+            role = reviewers.BY_KEY[key]["title"] + (f", часть {part + 1}/{n_parts}" if n_parts > 1 else "")
+            msg = f"{REFUSAL_PREFIX}«{role}») не выполнена: модель отказалась отвечать"
+            self.warnings.append(msg)
+            log.warning("%s", msg)
+
     def run(self) -> Report:
         t0 = time.monotonic()
         try:
@@ -305,6 +317,7 @@ class Run:
         self.stage("check")
         if graph.of("requirement") or doc.text.strip():
             planner.run(ctx)
+            self._refusal_warnings()
 
         self.stage("verify")
         verifier.run(ctx, check=opt.verify_pass)
@@ -589,11 +602,15 @@ class Run:
             if fx.get("action"):
                 fixes.append(FixItem(action=fx["action"], why=fx.get("why", ""), finding_ids=ids))
         top = [(f"{', '.join(fx.finding_ids)}: " if fx.finding_ids else "") + fx.action for fx in fixes]
-        notes = list(self.warnings)
+        notes = [n for n in self.warnings if not n.startswith(REFUSAL_PREFIX)]
+        refused = {k for k, _ in cov.get("reviews_refused") or []}
+        if refused:  # по роли в предупреждениях отчёта, здесь — одной короткой фразой
+            notes.append(f"модель отказалась проверять набор ({len(refused)} из {len(reviewers.PERSPECTIVES)} ролей)")
         if cov.get("uncovered_reqs"):
             notes.append(f"не проверены по всем критериям требования: {', '.join(cov['uncovered_reqs'][:8])}")
-        if cov.get("reviews_failed"):
-            notes.append(f"не ответили рецензенты набора: {', '.join(cov['reviews_failed'])}")
+        silent = [k for k in cov.get("reviews_failed") or [] if k not in refused]
+        if silent:
+            notes.append(f"не ответили рецензенты набора: {', '.join(silent)}")
         dedup_notes = [n for n in notes if n.startswith("слияние дублей")]
         notes = [n for n in notes if n not in dedup_notes]
         if notes:

@@ -426,6 +426,9 @@ def render_markdown(report: Report) -> str:
             rows.append(["Не проверены по всем критериям", ", ".join(qs.uncovered_requirements)])
         if qs.reviews_failed:
             rows.append(["Рецензенты без ответа", ", ".join(AGENT_RU.get("reviewer:" + k, k) for k in qs.reviews_failed)])
+        refusals = [w for w in qs.warnings if "модель отказалась отвечать" in w]
+        if refusals:
+            rows.append(["Отказ модели", "; ".join(refusals)])
         L += _table(["Показатель", "Значение"], rows) + [""]
 
     # Итог
