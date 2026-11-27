@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { api } from '@/api/client'
 import type { DocumentItem, ProviderId, ValidationOptions } from '@/api/types'
-import { DEFAULT_OPTIONS } from '@/api/types'
+import { DEFAULT_OPTIONS, isProviderConfigured } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Checkbox, Label, NativeSelect } from '@/components/ui/input'
@@ -23,6 +23,10 @@ function readLast(): { provider?: ProviderId; model?: string; options?: Validati
 
 export function useProviders() {
   return useQuery({ queryKey: ['providers'], queryFn: api.providers })
+}
+
+export function useAppSettings() {
+  return useQuery({ queryKey: ['settings'], queryFn: api.settings, staleTime: 60_000, retry: false })
 }
 
 export function useModels(provider?: ProviderId) {
@@ -47,6 +51,7 @@ export function LaunchRunDialog({
   const qc = useQueryClient()
   const navigate = useNavigate()
   const providers = useProviders()
+  const settings = useAppSettings()
   const last = useMemo(readLast, [])
 
   const usable = (providers.data ?? []).filter((p) => p.enabled)
@@ -54,15 +59,16 @@ export function LaunchRunDialog({
   const [model, setModel] = useState<string>(last.model ?? '')
   const [options, setOptions] = useState<Required<ValidationOptions>>({ ...DEFAULT_OPTIONS, ...last.options })
 
-  // Провайдер по умолчанию: последний использованный, иначе первый с ключом.
+  // Провайдер по умолчанию: последний использованный, иначе из параметров ИИ, иначе первый настроенный.
   useEffect(() => {
-    if (!providers.data) return
+    if (!providers.data || settings.isPending) return
     if (provider && usable.some((p) => p.provider === provider)) return
-    const pick = usable.find((p) => p.has_key) ?? usable[0]
+    const fromSettings = usable.find((p) => p.provider === settings.data?.default_provider && isProviderConfigured(p))
+    const pick = fromSettings ?? usable.find(isProviderConfigured) ?? usable[0]
     setProvider(pick?.provider)
-    setModel(pick?.default_model ?? '')
+    setModel((fromSettings && settings.data?.default_model) || pick?.default_model || '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providers.data])
+  }, [providers.data, settings.isPending])
 
   const models = useModels(provider)
   const current = usable.find((p) => p.provider === provider)
@@ -88,7 +94,7 @@ export function LaunchRunDialog({
     },
   })
 
-  const noKey = current && !current.has_key && current.provider !== 'openai_compatible'
+  const noKey = current && !isProviderConfigured(current)
   const opt = (k: keyof ValidationOptions) => (k === 'language' ? null : (
     <label key={k} className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/50">
       <Checkbox
@@ -144,7 +150,7 @@ export function LaunchRunDialog({
                   {usable.map((p) => (
                     <option key={p.provider} value={p.provider}>
                       {t(`provider.${p.provider}`)}
-                      {!p.has_key && p.provider !== 'openai_compatible' ? ` — ${t('launch.noKeyShort')}` : ''}
+                      {!isProviderConfigured(p) ? ` — ${t('launch.noKeyShort')}` : ''}
                     </option>
                   ))}
                 </NativeSelect>

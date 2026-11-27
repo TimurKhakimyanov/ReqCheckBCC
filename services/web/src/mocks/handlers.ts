@@ -1,9 +1,10 @@
 // MSW-обработчики для всех методов docs/api.md. Включаются VITE_USE_MOCKS=true (браузер) и в тестах (node).
 import { delay, http, HttpResponse, type JsonBodyType, type PathParams } from 'msw'
 import { formatSSE } from '@/api/sse'
-import type { DocumentFormat, ExportFormat, FindingReview, ProviderId, ReviewStatus, RunCreate } from '@/api/types'
-import { isTerminal, PROVIDERS } from '@/api/types'
+import type { AppSettingsUpdate, DocumentFormat, ExportFormat, FindingReview, ProviderId, ProviderUpdate, ReviewStatus, RunCreate } from '@/api/types'
+import { EMBEDDINGS_DIM_LIMITS, EMBEDDINGS_PROVIDERS, isProviderConfigured, isTerminal, PROVIDERS, SETTING_LIMITS } from '@/api/types'
 import {
+  probeProvider,
   chatAnswer,
   db,
   logAudit,
@@ -17,7 +18,6 @@ import {
 } from './data'
 
 const A = (p: string) => `*/api${p}`
-const MAX_UPLOAD_MB = 25
 
 /** Content-Disposition как у бэкенда: ASCII-запасное имя + filename* в UTF-8 (кириллица). */
 function contentDisposition(name: string) {
@@ -149,7 +149,25 @@ export const handlers = [
     guard(async ({ request, params }: { request: Request; params: Record<string, string> }) => {
       const p = db.providers[params.provider as ProviderId]
       if (!p) return err(404, 'Unknown provider')
-      const body = (await request.json()) as { api_key?: string; base_url?: string; enabled?: boolean; default_model?: string }
+      const body = (await request.json()) as ProviderUpdate
+      const errors: { loc: (string | number)[]; msg: string; type: string }[] = []
+      for (const k of ['extra_body', 'extra_body_set_review'] as const) {
+        const v = body[k]
+        if (v !== undefined && v !== null && (typeof v !== 'object' || Array.isArray(v)))
+          errors.push({ loc: ['body', k], msg: 'Input should be a valid dictionary', type: 'dict_type' })
+      }
+      const mot = body.max_output_tokens
+      if (mot !== undefined && mot !== null && (!Number.isInteger(mot) || mot < 1))
+        errors.push({ loc: ['body', 'max_output_tokens'], msg: 'Input should be a positive integer', type: 'int_type' })
+      const to = body.timeout_s
+      if (to !== undefined && to !== null && (!Number.isInteger(to) || to < 10 || to > 3600))
+        errors.push({ loc: ['body', 'timeout_s'], msg: 'Input should be between 10 and 3600', type: 'range' })
+      if (errors.length)
+        return HttpResponse.json({ detail: `Некорректные данные: ${errors[0].loc[1]}: ${errors[0].msg}`, code: 'validation_error', errors }, { status: 422 })
+      if (body.timeout_s !== undefined) p.timeout_s = body.timeout_s
+      if (body.extra_body !== undefined) p.extra_body = body.extra_body
+      if (body.extra_body_set_review !== undefined) p.extra_body_set_review = body.extra_body_set_review
+      if (body.max_output_tokens !== undefined) p.max_output_tokens = body.max_output_tokens
       if (body.api_key !== undefined) {
         p._key = body.api_key || undefined
         p.has_key = !!body.api_key
@@ -165,26 +183,94 @@ export const handlers = [
   ),
   http.post(
     A('/providers/:provider/test'),
-    guard(async ({ params }: { params: Record<string, string> }) => {
+    guard(async ({ request, params }) => {
       const p = db.providers[params.provider as ProviderId]
-      if (!p) return err(404, 'Unknown provider')
-      await delay(import.meta.env.MODE === 'test' ? 0 : 700)
-      const ok = p.has_key
+      if (!p) return err(404, 'Unknown provider', 'not_found')
+      // тело — ещё не сохранённые поля формы; пустые поля берутся из сохранённых настроек
+      const body = ((await request.json().catch(() => ({}))) ?? {}) as { api_key?: string; base_url?: string }
+      await delay(import.meta.env.MODE === 'test' ? 0 : 600)
+      const key = body.api_key || p._key || (p.has_key ? 'saved-key-a1b2' : undefined)
+      const res = probeProvider(p.provider, key, body.base_url ?? p.base_url)
+      // как бэкенд: короткий запрос к модели по умолчанию; модели нет у провайдера — 404, но список всё равно отдаём
+      const valid = res.ok && p.default_model ? res.models.includes(p.default_model) : null
+      if (valid === false)
+        return HttpResponse.json({
+          ok: false,
+          latency_ms: 180,
+          error: `NotFoundError: Error code: 404 - {'type': 'error', 'error': {'type': 'not_found_error', 'message': 'model: ${p.default_model}'}}`,
+          models: res.models,
+          default_model_valid: false,
+          warning: `Модель по умолчанию «${p.default_model}» не найдена у провайдера`,
+        })
       return HttpResponse.json({
-        ok,
-        latency_ms: ok ? 412 : 3,
-        error: ok ? null : p.provider === 'openai_compatible' ? `Нет соединения с ${p.base_url}` : 'API-ключ не задан',
+        ok: res.ok,
+        latency_ms: res.ok ? 412 : 35,
+        error: res.error ?? null,
+        models: res.models,
+        default_model_valid: valid,
+        warning: null,
       })
     }),
   ),
   http.get(
     A('/providers/:provider/models'),
-    guard(({ params }: { params: Record<string, string> }) => {
+    guard(({ params }) => {
       const p = db.providers[params.provider as ProviderId]
-      const models = MODELS[params.provider as ProviderId]
-      if (!p || !models) return err(404, 'Unknown provider', 'not_found')
-      // как бэкенд: без доступа к провайдеру — список-подсказка и текст ошибки, но всегда 200
-      return HttpResponse.json(p.has_key ? { models } : { models, error: 'API-ключ не задан — показан список по умолчанию' })
+      if (!p) return err(404, 'Unknown provider', 'not_found')
+      // как бэкенд: всегда 200; без доступа к провайдеру — список-подсказка и текст ошибки
+      const res = probeProvider(p.provider, p._key || (p.has_key ? 'saved-key-a1b2' : undefined), p.base_url)
+      if (res.ok)
+        return HttpResponse.json({
+          models: res.models,
+          default_model_valid: p.default_model ? res.models.includes(p.default_model) : null,
+        })
+      return HttpResponse.json({ models: MODELS[p.provider], error: res.error })
+    }),
+  ),
+
+  // ---------------- AI settings (admin)
+  http.get(
+    A('/settings'),
+    guard(() => HttpResponse.json(strip(db.settings) as unknown as JsonBodyType)),
+  ),
+  http.put(
+    A('/settings'),
+    guard(async ({ request }) => {
+      // как app_settings.update_settings бэкенда: частичное обновление, плоские поля
+      const body = (await request.json()) as AppSettingsUpdate
+      const errors: { loc: (string | number)[]; msg: string; type: string }[] = []
+      const ranges: Record<string, { min: number; max: number }> = { ...SETTING_LIMITS, embeddings_dim: EMBEDDINGS_DIM_LIMITS }
+      for (const [k, lim] of Object.entries(ranges)) {
+        const v = (body as Record<string, unknown>)[k]
+        if (v === undefined || v === null) continue
+        if (typeof v !== 'number' || Number.isNaN(v) || v < lim.min || v > lim.max)
+          errors.push({ loc: ['body', k], msg: `Input should be between ${lim.min} and ${lim.max}`, type: 'range' })
+      }
+      if (body.default_provider && !PROVIDERS.includes(body.default_provider))
+        errors.push({ loc: ['body', 'default_provider'], msg: 'Unknown provider', type: 'enum' })
+      if (body.embeddings_provider && !EMBEDDINGS_PROVIDERS.includes(body.embeddings_provider))
+        errors.push({ loc: ['body', 'embeddings_provider'], msg: 'Unknown embeddings provider', type: 'enum' })
+      if (errors.length)
+        return HttpResponse.json(
+          { detail: `Некорректные данные: ${errors[0].loc.slice(1).join('.')}: ${errors[0].msg}`, code: 'validation_error', errors },
+          { status: 422 },
+        )
+      const st = db.settings
+      const { embeddings_api_key: key, ...changes } = body
+      for (const [k, v] of Object.entries(changes)) {
+        const nullable = ['default_model', 'embeddings_model', 'embeddings_dim'].includes(k)
+        if (v === undefined || (v === null && !nullable)) continue
+        ;(st as unknown as Record<string, unknown>)[k] = nullable && v === '' ? null : v
+      }
+      if (key !== undefined) {
+        const k = key.trim()
+        st._embeddingsKey = k || undefined
+        st.embeddings_has_key = !!k
+        st.embeddings_key_hint = k ? `…${k.slice(-4)}` : null
+      }
+      st.updated_at = new Date().toISOString()
+      logAudit('settings_updated', null, { fields: Object.keys(body).sort() })
+      return HttpResponse.json(strip(st) as unknown as JsonBodyType)
     }),
   ),
 
@@ -211,7 +297,7 @@ export const handlers = [
       const ext = file.name.split('.').pop()?.toLowerCase() as DocumentFormat
       if (!['pdf', 'docx', 'md', 'txt'].includes(ext))
         return err(415, 'Формат не поддерживается: нужен PDF, DOCX, MD или TXT', 'unsupported_format')
-      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return err(413, `Файл больше ${MAX_UPLOAD_MB} МБ`, 'file_too_large')
+      if (file.size > db.settings.max_upload_mb * 1024 * 1024) return err(413, `Файл больше ${db.settings.max_upload_mb} МБ`, 'file_too_large')
       if (file.size === 0) return err(400, 'Файл пустой', 'empty_file')
       const doc = {
         id: uid('doc'),
@@ -278,13 +364,20 @@ export const handlers = [
       const doc = db.documents.find((d) => d.id === body.document_id)
       if (!doc) return err(404, 'Document not found', 'not_found')
       // provider/model необязательны: по умолчанию — первый провайдер с ключом и его модель
+      const fallback = db.settings.default_provider ? db.providers[db.settings.default_provider] : undefined
       const prov = body.provider
         ? db.providers[body.provider as ProviderId]
-        : PROVIDERS.map((p) => db.providers[p]).find((p) => p.enabled && p.has_key)
+        : fallback && isProviderConfigured(fallback)
+          ? fallback
+          : PROVIDERS.map((p) => db.providers[p]).find((p) => p.enabled && isProviderConfigured(p))
       if (!prov) return err(400, 'Нет провайдера с ключом. Добавьте ключ в кабинете.', 'provider_not_configured')
-      if (!prov.has_key && prov.provider !== 'openai_compatible')
-        return err(400, `У провайдера ${prov.provider} не задан API-ключ. Добавьте его в кабинете.`, 'provider_not_configured')
-      const model = body.model || prov.default_model || MODELS[prov.provider][0]
+      if (!isProviderConfigured(prov))
+        return err(400, `Провайдер ${prov.provider} не настроен: задайте ключ (или адрес для локальной модели) в кабинете.`, 'provider_not_configured')
+      const model =
+        body.model ||
+        (!body.provider && db.settings.default_provider === prov.provider ? db.settings.default_model : null) ||
+        prov.default_model ||
+        MODELS[prov.provider][0]
       const run = newRun(doc, prov.provider, model, body.options ?? {})
       logAudit('run.create', run.id, { provider: prov.provider, model })
       return HttpResponse.json(materialize(run), { status: 202 })
@@ -555,7 +648,7 @@ export const handlers = [
       status: 'degraded',
       version: 'mock',
       checks: { postgres: 'ok', redis: 'ok', qdrant: 'ok', s3: 'ok', embedder: 'error: демо-режим, эмбеддер не запущен' },
-      limits: { max_upload_mb: MAX_UPLOAD_MB },
+      limits: { max_upload_mb: db.settings.max_upload_mb },
     }),
   ),
   http.get(

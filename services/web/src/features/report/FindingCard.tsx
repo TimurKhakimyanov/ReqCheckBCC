@@ -68,15 +68,16 @@ export const FindingCard = forwardRef<HTMLDivElement, Props>(function FindingCar
     <div
       ref={ref}
       data-finding={f.id}
+      data-active={active}
       onClick={() => !active && onSelect()}
       className={cn(
-        'rounded-lg border bg-card p-3 text-sm transition-shadow',
-        active ? 'ring-2 ring-primary' : 'cursor-pointer hover:border-primary/40',
+        'rounded-xl bg-card p-3.5 text-sm shadow-card transition-shadow',
+        active ? 'shadow-raised ring-[1.5px] ring-primary' : 'cursor-pointer hover:shadow-raised',
         status !== 'open' && !active && 'opacity-70',
       )}
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="font-mono text-xs font-semibold">{f.id}</span>
+        <span className="font-mono text-xs font-medium tracking-tight">{f.id}</span>
         <SeverityBadge severity={f.severity} />
         <Badge variant="outline" title={t(`criteria.${f.criterion}.description`)}>
           {t(`criteria.${f.criterion}.title`)}
@@ -127,7 +128,7 @@ export const FindingCard = forwardRef<HTMLDivElement, Props>(function FindingCar
                 key={i}
                 type="button"
                 onClick={() => onSelect(i)}
-                className="group rounded-md border-l-2 border-primary/60 bg-muted/50 px-2.5 py-1.5 text-left hover:bg-muted"
+                className="group rounded-lg border-l-2 border-primary/70 bg-muted px-2.5 py-1.5 text-left hover:bg-accent"
               >
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <MapPin className="size-3" />

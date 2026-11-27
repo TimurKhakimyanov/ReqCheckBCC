@@ -16,6 +16,12 @@ beforeAll(async () => {
     patched(typeof input === 'string' && input.startsWith('/') ? new URL(input, location.origin).href : input, init)
   await i18n.changeLanguage('ru')
   Element.prototype.scrollIntoView = vi.fn()
+  // Radix Popover (floating-ui) ждёт ResizeObserver, которого нет в jsdom
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
 })
 
 beforeEach(() => {

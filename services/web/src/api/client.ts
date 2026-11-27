@@ -1,6 +1,8 @@
 // Тонкий клиент HTTP API (docs/api.md). Все запросы идут на тот же origin: /api/* проксирует nginx.
 import { readSSE } from './sse'
 import type {
+  AppSettings,
+  AppSettingsUpdate,
   AuditEntry,
   ChatMessage,
   DocumentItem,
@@ -13,6 +15,7 @@ import type {
   Page,
   ProviderId,
   ProviderSettings,
+  ProviderTestRequest,
   ProviderTestResult,
   ProviderUpdate,
   Report,
@@ -139,8 +142,13 @@ export const api = {
   providers: () => request<ProviderSettings[]>('/providers'),
   updateProvider: (p: ProviderId, body: ProviderUpdate) =>
     request<ProviderSettings>(`/providers/${p}`, { method: 'PUT', json: body }),
-  testProvider: (p: ProviderId) => request<ProviderTestResult>(`/providers/${p}/test`, { method: 'POST' }),
+  testProvider: (p: ProviderId, body: ProviderTestRequest = {}, signal?: AbortSignal) =>
+    request<ProviderTestResult>(`/providers/${p}/test`, { method: 'POST', json: body, signal }),
   models: (p: ProviderId) => request<ModelsResponse>(`/providers/${p}/models`),
+
+  // --- AI settings (admin)
+  settings: () => request<AppSettings>('/settings'),
+  updateSettings: (body: AppSettingsUpdate) => request<AppSettings>('/settings', { method: 'PUT', json: body }),
 
   // --- documents
   documents: (params: { limit?: number; offset?: number; q?: string } = {}) =>

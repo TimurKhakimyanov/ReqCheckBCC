@@ -62,7 +62,7 @@ export function FindingsPanel({ visible, filters, setFilters }: Props) {
               aria-pressed={filters.severities.includes(s)}
               onClick={() => toggleSev(s)}
               className={cn(
-                'inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+                'press inline-flex cursor-pointer items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs font-[450] shadow-xs',
                 filters.severities.includes(s) ? SEV_ON[s] : 'hover:bg-muted',
               )}
             >

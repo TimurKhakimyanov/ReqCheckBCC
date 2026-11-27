@@ -9,9 +9,9 @@ export function Progress({ value, className }: { value: number; className?: stri
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(pct)}
-      className={cn('relative h-2 w-full overflow-hidden rounded-full bg-muted', className)}
+      className={cn('relative h-1.5 w-full overflow-hidden rounded-full bg-muted shadow-inset', className)}
     >
-      <div className="h-full bg-primary transition-[width] duration-500" style={{ width: `${pct}%` }} />
+      <div className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out" style={{ width: `${pct}%` }} />
     </div>
   )
 }
@@ -37,18 +37,18 @@ export function Table({ className, ...props }: React.ComponentProps<'table'>) {
   )
 }
 export function THead({ className, ...props }: React.ComponentProps<'thead'>) {
-  return <thead className={cn('[&_tr]:border-b', className)} {...props} />
+  return <thead className={cn('[&_tr]:border-b [&_tr]:hover:bg-transparent', className)} {...props} />
 }
 export function TBody({ className, ...props }: React.ComponentProps<'tbody'>) {
   return <tbody className={cn('[&_tr:last-child]:border-0', className)} {...props} />
 }
 export function TR({ className, ...props }: React.ComponentProps<'tr'>) {
-  return <tr className={cn('border-b transition-colors hover:bg-muted/40', className)} {...props} />
+  return <tr className={cn('border-b transition-colors hover:bg-muted/60', className)} {...props} />
 }
 export function TH({ className, ...props }: React.ComponentProps<'th'>) {
   return (
     <th
-      className={cn('h-9 px-3 text-left align-middle text-xs font-medium whitespace-nowrap text-muted-foreground', className)}
+      className={cn('label-mono h-9 px-3 text-left align-middle font-normal whitespace-nowrap', className)}
       {...props}
     />
   )
@@ -70,7 +70,11 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-      {icon && <div className="text-muted-foreground [&_svg]:size-8">{icon}</div>}
+      {icon && (
+        <div className="mb-1 flex size-12 items-center justify-center rounded-xl bg-card text-muted-foreground shadow-card [&_svg]:size-5">
+          {icon}
+        </div>
+      )}
       <p className="font-medium">{title}</p>
       {hint && <p className="max-w-sm text-sm text-muted-foreground">{hint}</p>}
       {children}
@@ -82,15 +86,19 @@ export function PageHeader({
   title,
   description,
   actions,
+  eyebrow,
 }: {
   title: React.ReactNode
   description?: React.ReactNode
   actions?: React.ReactNode
+  /** Моноширинная метка над заголовком, напр. «[ 01 ] Документы» */
+  eyebrow?: React.ReactNode
 }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="truncate text-2xl font-semibold tracking-tight">{title}</h1>
+        {eyebrow && <div className="label-mono mb-2">{eyebrow}</div>}
+        <h1 className="truncate text-[1.75rem] leading-tight font-medium tracking-[-0.02em]">{title}</h1>
         {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}

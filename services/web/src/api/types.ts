@@ -63,6 +63,14 @@ export interface ProviderSettings {
   base_url: string | null
   default_model: string | null
   updated_at: string | null
+  /** Доп. поля тела запроса (OpenAI-совместимые серверы); null — нет */
+  extra_body?: Record<string, unknown> | null
+  /** Переопределение extra_body для проверки набора; null — используется extra_body */
+  extra_body_set_review?: Record<string, unknown> | null
+  /** Лимит токенов ответа; null — ядро выбирает с запасом */
+  max_output_tokens?: number | null
+  /** Таймаут одного запроса к модели, с; null — 180 */
+  timeout_s?: number | null
 }
 
 export interface ProviderUpdate {
@@ -70,12 +78,107 @@ export interface ProviderUpdate {
   base_url?: string
   enabled?: boolean
   default_model?: string
+  extra_body?: Record<string, unknown> | null
+  extra_body_set_review?: Record<string, unknown> | null
+  max_output_tokens?: number | null
+  timeout_s?: number | null
 }
 
 export interface ProviderTestResult {
   ok: boolean
   latency_ms: number
   error?: string | null
+  /** Модели, которые вернул провайдер при проверке (живой список). Заполняется и при ok: false. */
+  models?: string[]
+  /** Есть ли модель по умолчанию в этом списке; null — неизвестно */
+  default_model_valid?: boolean | null
+  /** Предупреждение бэкенда (напр., модель по умолчанию недоступна) */
+  warning?: string | null
+}
+
+/** Проверка ещё не сохранённых значений формы: ключ и/или адрес. Пустое тело — сохранённые настройки. */
+export interface ProviderTestRequest {
+  api_key?: string
+  base_url?: string
+  extra_body?: Record<string, unknown> | null
+  timeout_s?: number | null
+}
+
+/** Провайдер готов к прогонам: ключ задан, а для локальной модели достаточно адреса. */
+export function isProviderConfigured(p: Pick<ProviderSettings, 'provider' | 'has_key' | 'base_url'>) {
+  return p.provider === 'openai_compatible' ? !!p.base_url : p.has_key
+}
+
+export type EmbeddingsProvider = 'local' | 'gemini' | 'openai'
+export const EMBEDDINGS_PROVIDERS: EmbeddingsProvider[] = ['local', 'gemini', 'openai']
+
+/**
+ * Параметры ИИ из админки — services/api/app/app_settings.py (SettingsOut / SettingsUpdate).
+ * batch_size/concurrency → ValidationOptions, min_interval_s/max_attempts → ProviderConfig.
+ */
+export interface AppSettings {
+  default_provider: ProviderId
+  default_model: string | null
+  /** Общий лимит на прогон, с */
+  run_timeout_s: number
+  /** Пауза между вызовами модели, с */
+  min_interval_s: number
+  /** Попыток на вызов при 429/5xx/сети */
+  max_attempts: number
+  /** Требований в одном запросе */
+  batch_size: number
+  /** Параллельных запросов к модели */
+  concurrency: number
+  embeddings_provider: EmbeddingsProvider
+  /** null — модель по умолчанию для провайдера */
+  embeddings_model: string | null
+  /** Размерность (только gemini, outputDimensionality); null — 768 */
+  embeddings_dim: number | null
+  max_upload_mb: number
+  session_ttl_hours: number
+  embeddings_has_key: boolean
+  embeddings_key_hint: string | null
+  updated_at?: string | null
+}
+
+/** PUT /settings: только изменяемые поля. embeddings_api_key: "" — удалить ключ. */
+export type AppSettingsUpdate = Partial<Omit<AppSettings, 'embeddings_has_key' | 'embeddings_key_hint' | 'updated_at'>> & {
+  embeddings_api_key?: string
+}
+
+export type NumericSetting =
+  | 'run_timeout_s'
+  | 'min_interval_s'
+  | 'max_attempts'
+  | 'batch_size'
+  | 'concurrency'
+  | 'max_upload_mb'
+  | 'session_ttl_hours'
+
+/** Границы и значения по умолчанию — как в AppSettings бэкенда. Сервер проверяет сам (422 с errors). */
+export const SETTING_LIMITS: Record<NumericSetting, { min: number; max: number; step: number; default: number }> = {
+  run_timeout_s: { min: 60, max: 21600, step: 60, default: 1800 },
+  min_interval_s: { min: 0, max: 120, step: 0.5, default: 0 },
+  max_attempts: { min: 1, max: 20, step: 1, default: 6 },
+  batch_size: { min: 1, max: 50, step: 1, default: 6 },
+  concurrency: { min: 1, max: 16, step: 1, default: 1 },
+  max_upload_mb: { min: 1, max: 500, step: 1, default: 25 },
+  session_ttl_hours: { min: 1, max: 720, step: 1, default: 12 },
+}
+
+export const EMBEDDINGS_DIM_LIMITS = { min: 16, max: 4096, default: 768 }
+
+/** Модель по умолчанию, если embeddings_model = null (local — встроенная модель сервиса embedder). */
+export const DEFAULT_EMBEDDING_MODEL: Record<EmbeddingsProvider, string | null> = {
+  local: null,
+  gemini: 'gemini-embedding-001',
+  openai: 'text-embedding-3-small',
+}
+
+export const EMBEDDING_MODELS: Record<EmbeddingsProvider, string[]> = {
+  local: ['intfloat/multilingual-e5-small', 'intfloat/multilingual-e5-base'],
+  gemini: ['gemini-embedding-001', 'text-embedding-004'],
+  openai: ['text-embedding-3-small', 'text-embedding-3-large'],
 }
 
 export type DocumentFormat = 'pdf' | 'docx' | 'md' | 'txt'
@@ -252,6 +355,8 @@ export interface ModelsResponse {
   models: string[]
   /** Провайдер недоступен — models содержит список-подсказку. */
   error?: string | null
+  default_model_valid?: boolean | null
+  warning?: string | null
 }
 
 export type ExportFormat = 'md' | 'pdf' | 'docx' | 'json'
