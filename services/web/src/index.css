@@ -60,13 +60,15 @@
   --warning: #854d0e;
 
   /* серьёзность дефектов: основной цвет и фон подсветки в тексте */
-  --sev-critical: #c2410c;
-  --sev-critical-bg: #fff1e8;
-  --sev-major: #1d4ed8;
-  --sev-major-bg: #eff6ff;
-  --sev-minor: #854d0e;
-  --sev-minor-bg: #fef9e7;
+  --sev-critical: #c2551a;
+  --sev-critical-bg: rgb(224 107 31 / 0.14);
+  --sev-major: #3f5fd6;
+  --sev-major-bg: rgb(106 134 240 / 0.14);
+  --sev-minor: #8a7310;
+  --sev-minor-bg: rgb(166 140 26 / 0.16);
   --highlight-active: #6366f1;
+  /* оранжевый акцент отчёта: активный раздел, фокус */
+  --report-accent: #d9611a;
 
   /* тени: вместо мягких теней — тонкая рамка */
   --shadow-xs: 0 1px 2px rgb(16 24 40 / 0.05);
@@ -134,6 +136,7 @@
   --sev-minor: #b8a030;
   --sev-minor-bg: rgb(166 140 26 / 0.22);
   --highlight-active: #a5b4fc;
+  --report-accent: #ef7722;
 
   --shadow-xs: 0 0 0 1px var(--border);
   --shadow-card: 0 0 0 1px #2e2e36, 0 10px 28px -16px rgb(0 0 0 / 0.7);
@@ -196,6 +199,7 @@
   --color-sev-minor: var(--sev-minor);
   --color-sev-minor-bg: var(--sev-minor-bg);
   --color-highlight-active: var(--highlight-active);
+  --color-report-accent: var(--report-accent);
   --shadow-xs: var(--shadow-xs);
   --shadow-card: var(--shadow-card);
   --shadow-raised: var(--shadow-raised);
@@ -708,40 +712,92 @@
   }
 }
 
-/* Подсветка цитат в тексте документа */
+/* ---------------------------------------------------------------- Отчёт: текст документа */
+/* Подсветка цитат дефектов: фон и черта снизу цвета серьёзности; выбранный — тонкая рамка */
 mark.rc-hl {
   color: inherit;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
-  border-radius: 5px;
+  border-radius: 2px;
   cursor: pointer;
-  padding: 1px 0;
+  padding: 1px 1px;
+  margin: 0 -1px;
   transition:
-    box-shadow 0.15s,
-    background-color 0.15s;
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
 }
 mark.rc-hl[data-severity='critical'] {
+  --hl: var(--sev-critical);
   background: var(--sev-critical-bg);
-  box-shadow: inset 0 -2px 0 var(--sev-critical);
 }
 mark.rc-hl[data-severity='major'] {
+  --hl: var(--sev-major);
   background: var(--sev-major-bg);
-  box-shadow: inset 0 -2px 0 var(--sev-major);
 }
 mark.rc-hl[data-severity='minor'] {
+  --hl: var(--sev-minor);
   background: var(--sev-minor-bg);
-  box-shadow: inset 0 -2px 0 var(--sev-minor);
+}
+mark.rc-hl {
+  box-shadow: inset 0 -2px 0 var(--hl, var(--border));
 }
 mark.rc-hl:hover {
-  filter: saturate(1.3);
+  background: color-mix(in srgb, var(--hl) 24%, transparent);
 }
 mark.rc-hl[data-active='true'] {
+  background: color-mix(in srgb, var(--hl) 28%, transparent);
   box-shadow:
-    0 0 0 2px var(--highlight-active),
-    0 4px 12px -2px rgb(79 70 229 / 0.25);
+    inset 0 -2px 0 var(--hl),
+    0 0 0 1.5px var(--foreground);
+}
+mark.rc-focus {
+  color: inherit;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--report-accent);
+  border-radius: 2px;
 }
 
-/* Читаемый вид документа: разметка Markdown скрыта, но остаётся в тексте (смещения цитат не меняются) */
+/* Пометка D-xxx на полях документа */
+.rc-pin {
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0;
+  padding: 3px 5px;
+  border: 1px solid var(--hl, var(--border));
+  color: var(--hl, var(--muted-foreground));
+  background: var(--card);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    top 0.2s ease;
+}
+.rc-pin[data-severity='critical'] {
+  --hl: var(--sev-critical);
+}
+.rc-pin[data-severity='major'] {
+  --hl: var(--sev-major);
+}
+.rc-pin[data-severity='minor'] {
+  --hl: var(--sev-minor);
+}
+.rc-pin:hover {
+  background: color-mix(in srgb, var(--hl) 14%, var(--card));
+}
+.rc-pin[data-active='true'] {
+  background: var(--hl);
+  color: var(--card);
+}
+.rc-pin:focus-visible,
+.rc-focusable:focus-visible {
+  outline: 2px solid var(--report-accent);
+  outline-offset: 2px;
+}
+
+/*
+ * Читаемый вид документа (prettyText.tsx): строки Markdown становятся блоками — заголовки, абзацы,
+ * пункты списков, таблицы. Символы разметки (#, **, крайние «|») остаются в DOM скрытыми.
+ */
 .md-syn,
 .md-sep {
   display: none;
@@ -750,24 +806,79 @@ mark.rc-hl[data-active='true'] {
   color: var(--border);
   margin: 0 0.4em;
 }
+.md-p {
+  margin: 0;
+}
+.md-gap {
+  height: 0.7em;
+}
 .md-h {
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   color: var(--foreground);
+  scroll-margin-top: 64px;
 }
 .md-h1 {
   font-size: 1.5rem;
-  line-height: 2.2rem;
+  line-height: 1.25;
+  margin: 0.2em 0 0.5em;
 }
 .md-h2 {
   font-size: 1.2rem;
-  line-height: 2rem;
+  line-height: 1.35;
+  margin: 1.1em 0 0.4em;
 }
-.md-h3,
-.md-h4 {
+.md-h3 {
   font-size: 1.05rem;
+  line-height: 1.4;
+  margin: 1em 0 0.3em;
 }
-mark.rc-hl[data-dim='true'] {
-  background: transparent;
-  box-shadow: inset 0 -1px 0 var(--border);
+.md-h4,
+.md-h5,
+.md-h6 {
+  font-size: 0.95rem;
+  line-height: 1.45;
+  margin: 0.8em 0 0.2em;
+  color: var(--muted-foreground);
+}
+.md-li {
+  display: grid;
+  grid-template-columns: 1.1em minmax(0, 1fr);
+  gap: 0.35em;
+}
+.md-bullet {
+  color: var(--muted-foreground);
+  user-select: none;
+}
+.md-hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+.md-table-wrap {
+  overflow-x: auto;
+  margin: 0.4em 0 0.9em;
+}
+.md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+.md-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: bottom;
+}
+.md-table td {
+  padding: 7px 10px 7px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  vertical-align: top;
+}
+.md-table tr:last-child td {
+  border-bottom: 0;
 }

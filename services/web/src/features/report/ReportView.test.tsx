@@ -17,8 +17,13 @@ describe('Report screen', () => {
     // подсвечен ровно текст цитаты по смещениям
     const d001 = sampleReport.findings.find((f) => f.id === 'D-001')!
     const mark = container.querySelector('mark[data-loc~="D-001:0"]')!
-    expect(mark.textContent?.replace(/^D-001/, '')).toBe(d001.locations[0].quote)
-    expect(screen.getByText('Не готово к разработке')).toBeInTheDocument()
+    expect(mark.textContent).toBe(d001.locations[0].quote)
+    // на полях — по одной пометке D-xxx на каждый дефект с найденной цитатой
+    expect([...container.querySelectorAll('.rc-pin')].map((p) => p.textContent).sort()).toEqual(sampleReport.findings.map((f) => f.id).sort())
+    // Markdown документа отрисован: таблицы — настоящие таблицы, «|» и «**» не видны текстом
+    expect(within(screen.getByTestId('document-viewer')).getAllByRole('table').length).toBeGreaterThan(0)
+    expect(screen.getByRole('status')).toHaveTextContent('Не готово к разработке')
+    expect(screen.getByRole('status')).toHaveTextContent('Сначала закрыть: 3 критических дефекта, 2 блокирующих вопроса')
   })
 
   it('clicking a finding activates its highlights; clicking a highlight selects the finding', async () => {
@@ -103,10 +108,58 @@ describe('Report screen', () => {
     const qs = sampleReport.questions ?? []
     expect(qs.length).toBeGreaterThan(0)
     for (const q of qs) expect(screen.getByText(q.question)).toBeInTheDocument()
-    const opts = screen.getAllByRole('list', { name: 'Варианты ответа' })[0]
+    const opts = screen.getAllByRole('radiogroup', { name: 'Варианты ответа' })[0]
     expect(within(opts).getByText(qs[0].options![0])).toBeInTheDocument()
     expect(screen.getAllByText('Блокирующий').length).toBe(qs.filter((q) => q.priority === 'blocker').length)
+    // выбор варианта засчитывается как ответ и переживает перерисовку (хранится в браузере)
+    expect(screen.getByText(`Отвечено 0 из ${qs.length}`)).toBeInTheDocument()
+    await user.click(within(opts).getByLabelText(new RegExp(qs[0].options![0])))
+    expect(screen.getByText(`Отвечено 1 из ${qs.length}`)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Без ответа/ }))
+    expect(screen.queryByText(qs[0].question)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^Все/ }))
     await user.click(screen.getAllByRole('button', { name: qs[0].finding_ids![0] })[0])
     expect(screen.getByRole('tab', { name: /Дефекты/ })).toHaveAttribute('data-state', 'active')
+  })
+
+  it('opens the section from ?tab= and shows counters in the section menu', async () => {
+    renderReport('?tab=passport')
+    expect(await screen.findByText(sampleReport.passport.document_sha256)).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Паспорт' })).toHaveAttribute('data-state', 'active')
+    expect(screen.getByRole('tab', { name: /Дефекты/ })).toHaveTextContent(String(sampleReport.findings.length))
+    const setPass = sampleReport.set_assessment.checks.filter((c) => c.verdict === 'pass').length
+    expect(screen.getByRole('tab', { name: /Проверка набора/ })).toHaveTextContent(`${setPass}/${sampleReport.set_assessment.checks.length}`)
+  })
+
+  it('groups findings by document order and steps through them with the arrows', async () => {
+    const user = userEvent.setup()
+    renderReport()
+    const list = await screen.findByTestId('findings-list')
+    await user.click(screen.getByRole('button', { name: 'По документу' }))
+    await user.click(screen.getByRole('button', { name: 'Следующий дефект' }))
+    // первая цитата в тексте — у D-001, следом в той же строке — D-003
+    expect(list.querySelector('[data-finding="D-001"]')).toHaveAttribute('data-active', 'true')
+    await user.click(screen.getByRole('button', { name: 'Следующий дефект' }))
+    expect(list.querySelector('[data-finding="D-003"]')).toHaveAttribute('data-active', 'true')
+    await user.click(screen.getByRole('button', { name: 'Предыдущий дефект' }))
+    expect(list.querySelector('[data-finding="D-001"]')).toHaveAttribute('data-active', 'true')
+    // повторный клик по заголовку выбранной карточки сворачивает её
+    await user.click(within(list.querySelector('[data-finding="D-001"]') as HTMLElement).getByRole('button', { expanded: true }))
+    expect(list.querySelector('[data-active="true"]')).toBeNull()
+  })
+
+  it('requirements section filters by kind and links to findings', async () => {
+    const user = userEvent.setup()
+    renderReport('?tab=requirements')
+    const table = await screen.findByRole('table')
+    expect(within(table).getAllByRole('row')).toHaveLength(sampleReport.requirements.length + 1)
+    await user.click(screen.getByRole('button', { name: /^API/ }))
+    const api = sampleReport.requirements.filter((r) => r.kind === 'api')
+    expect(within(table).getAllByRole('row')).toHaveLength(api.length + 1)
+    await user.click(within(table).getByRole('button', { name: /Критический/ }))
+    expect(screen.getByRole('tab', { name: /Дефекты/ })).toHaveAttribute('data-state', 'active')
+    const list = await screen.findByTestId('findings-list')
+    const expected = sampleReport.findings.filter((f) => f.requirement_ids?.includes(api[0].id))
+    expect(list.querySelectorAll('[data-finding]')).toHaveLength(expected.length)
   })
 })
