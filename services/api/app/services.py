@@ -31,6 +31,9 @@ def make_celery(name: str = "reqcheck") -> Celery:
         task_reject_on_worker_lost=True,
         worker_prefetch_multiplier=1,
         broker_connection_retry_on_startup=True,
+        # задача с acks_late не должна переотправляться, пока идёт долгий прогон
+        broker_transport_options={"visibility_timeout": s.run_timeout_s + 900},
+        result_backend_transport_options={"visibility_timeout": s.run_timeout_s + 900},
         timezone="UTC",
     )
     return app
