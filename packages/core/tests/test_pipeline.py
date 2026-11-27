@@ -218,3 +218,11 @@ def test_short_first_phrase_is_not_used_as_title():
     long = "«Переводы» — не определено, относятся ли к ним переводы между своими картами, пополнения и платежи по реквизитам"
     title, _ = split_title(long, "")
     assert title.startswith("«Переводы» — не определено") and len(title) <= TITLE_LIMIT
+
+
+def test_foreign_script_leaks_are_removed_from_model_text(sample_path):
+    llm = scripted()
+    llm.responses["ConclusionResult"] = {"rationale": "Нет ветки除了happy-path.", "top_fixes": ["Описать ветки除了успеха"]}
+    report = run_pipeline(parse_document(sample_path), llm)
+    assert report.conclusion.rationale == "Нет ветки happy-path."
+    assert report.conclusion.top_fixes == ["Описать ветки успеха"]

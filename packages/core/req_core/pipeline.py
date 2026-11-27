@@ -110,6 +110,34 @@ class Progress:
         self(self.stage, self.last, message)
 
 
+FOREIGN_SCRIPT = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]+")
+
+
+def _clean(s: str | None) -> str | None:
+    if not s:
+        return s
+    return re.sub(r"[ \t]{2,}", " ", FOREIGN_SCRIPT.sub(" ", s)).strip()
+
+
+def strip_foreign_script(report: Report) -> Report:
+    """Убирает иероглифы, которые модель (напр. китайская) вставляет в русский текст. Цитаты не трогаем —
+    они дословно из документа; вызывается, только если в самом документе таких символов нет."""
+    for f in report.findings:
+        f.title, f.explanation, f.suggestion = _clean(f.title), _clean(f.explanation), _clean(f.suggestion)
+    for r in report.requirements:
+        r.summary = _clean(r.summary)
+    for a in report.requirement_assessments:
+        for c in a.checks:
+            c.comment = _clean(c.comment)
+    for c in report.set_assessment.checks:
+        c.comment = _clean(c.comment)
+    for item in report.checklist:
+        item.comment = _clean(item.comment)
+    report.conclusion.rationale = _clean(report.conclusion.rationale)
+    report.conclusion.top_fixes = [_clean(x) for x in report.conclusion.top_fixes]
+    return report
+
+
 TITLE_LIMIT = 110
 
 
@@ -546,6 +574,8 @@ class Pipeline:
             set_assessment=set_assessment, findings=report_findings, checklist=checklist,
             summary=summary, conclusion=conclusion, usage=usage,
         )
+        if not FOREIGN_SCRIPT.search(self.doc.text):
+            report = strip_foreign_script(report)
         self.progress(RunStage.DONE, 1.0, f"Готово: требований {len(requirements)}, дефектов {len(findings)}")
         return report
 
