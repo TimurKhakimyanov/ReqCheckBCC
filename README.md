@@ -92,27 +92,28 @@ docker-сети `backend`. TLS, домен и обратный прокси на
 
 ### Первый запуск
 
+В `.env` только ключи, пароли и логины. Всё про ИИ (провайдеры, API-ключи, модели, эмбеддинги) задаётся
+после запуска в веб-интерфейсе, в разделе «Администрирование». Полный список настроек —
+[docs/configuration.md](docs/configuration.md).
+
 ```bash
 git clone <репозиторий> reqcheck && cd reqcheck
-cp .env.example .env
+# создать .env из .env.example и заполнить пустые секреты случайными значениями (только в Docker):
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work alpine:3 sh deploy/secrets/generate.sh
 ```
 
-В `.env` обязательно заменить все `change-me`: `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `QDRANT_API_KEY`,
-`S3_SECRET_KEY`, `GRAFANA_ADMIN_PASSWORD`, а также `APP_SECRET_KEY`, `APP_ENCRYPTION_KEY`, `ADMIN_PASSWORD`
-(раздел бэкенда). Секрет можно сгенерировать прямо в Docker, ничего не ставя на хост:
-
-```bash
-docker run --rm alpine:3 sh -c 'tr -dc A-Za-z0-9 < /dev/urandom | head -c 40; echo'
-```
-
-Пароли Postgres и ключи S3 применяются при **первой** инициализации томов; чтобы сменить их потом,
-меняйте и в `.env`, и в самой базе (`ALTER USER ...`). Затем:
+При необходимости раскомментируйте в конце `.env` блок «Необязательно при установке»: `BIND_ADDR`, `WEB_PORT`,
+`GRAFANA_PORT`, `COMPOSE_PROFILES=monitoring` (мониторинг). Затем:
 
 ```bash
 docker compose up -d --build
 docker compose ps                     # все сервисы healthy / running
 docker compose --profile test run --rm --build test-infra   # смоук-тест хранилищ
 ```
+
+Войдите в веб (`http://<BIND_ADDR>:<WEB_PORT>`) под `ADMIN_USERNAME` / `ADMIN_PASSWORD` из `.env` и в
+«Администрировании» добавьте ключ LLM-провайдера. Пароли Postgres и ключи S3 применяются при **первой**
+инициализации томов; как сменить их потом — [docs/configuration.md](docs/configuration.md#смена-секретов-после-установки).
 
 ### Профили
 
@@ -147,12 +148,13 @@ Postgres нужен дамп и восстановление (см. «Бэкап
 
 ### Офлайн-установка (локальная LLM)
 
-1. В `.env`: `COMPOSE_PROFILES=monitoring,offline`, `OLLAMA_MODELS=qwen3:8b` (через запятую можно несколько),
-   `LLM_PROVIDER=openai_compatible`, `OPENAI_COMPATIBLE_BASE_URL=http://ollama:11434/v1`,
-   `OPENAI_COMPATIBLE_MODEL=qwen3:8b`, `OPENAI_COMPATIBLE_API_KEY=ollama`, `EMBEDDINGS_PROVIDER=local`.
+1. В `.env`: `COMPOSE_PROFILES=monitoring,offline` и модели для вшивания в образ, например
+   `OLLAMA_MODELS=qwen3:8b` (через запятую можно несколько; см. [docs/configuration.md](docs/configuration.md)).
 2. `docker compose up -d --build` **на машине с интернетом**: модели скачиваются при сборке и лежат внутри
    образа `reqcheck-ollama:local`, модель эмбеддингов — внутри образа `embedder`.
-3. Дальше сервер работает без интернета. Перенос на изолированный сервер без сборки — через
+3. В веб-интерфейсе, «Администрирование»: провайдер `openai_compatible`, адрес `http://ollama:11434/v1`,
+   модель из `OLLAMA_MODELS`, эмбеддинги — локальные.
+4. Дальше сервер работает без интернета. Перенос на изолированный сервер без сборки — через
    `docker save`/`docker load` (готовый комплект — в бэклоге).
 
 Сменили список моделей — пересоберите: `docker compose build ollama && docker compose up -d ollama`.
@@ -167,13 +169,13 @@ sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart doc
 docker run --rm --gpus all ubuntu nvidia-smi      # проверка: видна видеокарта
 ```
 
-Затем в `.env` — те же настройки, что для офлайна, но `COMPOSE_PROFILES=monitoring,gpu`. Сервис `ollama-gpu`
+Затем — те же шаги, что для офлайна, но `COMPOSE_PROFILES=monitoring,gpu`. Сервис `ollama-gpu`
 резервирует все GPU (`deploy.resources.reservations.devices`) и доступен по адресу `http://ollama:11434`.
 Проверка: `docker compose exec ollama-gpu ollama ps` — в колонке PROCESSOR должно быть `100% GPU`.
 
 ### Мониторинг
 
-Профиль `monitoring` (включён в `.env.example` по умолчанию). Grafana: `http://<BIND_ADDR>:<GRAFANA_PORT>`,
+Профиль `monitoring` включается строкой `COMPOSE_PROFILES=monitoring` в `.env`. Grafana: `http://<BIND_ADDR>:<GRAFANA_PORT>`,
 логин `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`, домашний дашборд — «ReqCheck» (API, прогоны, очередь
 Celery, токены LLM, ресурсы, логи). Логи всех контейнеров — в Loki (Grafana → Explore). Хранение:
 `PROMETHEUS_RETENTION` (15d), `LOKI_RETENTION` (14 дней). Логи Docker ротируются (5 файлов по 10 МБ на контейнер).
