@@ -153,7 +153,6 @@ services:
   cli:
     build: { <<: *python-build, dockerfile: services/cli/Dockerfile, target: runtime }
     profiles: [cli]
-    env_file: [{ path: .env, required: false }]
     volumes: ["./data:/data"]
     networks: [backend]
 

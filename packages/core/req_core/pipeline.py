@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -66,20 +66,16 @@ log = logging.getLogger("req_core.pipeline")
 SEVERITY_RANK = {Severity.CRITICAL: 0, Severity.MAJOR: 1, Severity.MINOR: 2}
 
 
-def _env_int(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.environ.get(name, default)))
-    except ValueError:
-        return default
-
-
 class Settings:
-    def __init__(self) -> None:
-        self.context_chars = _env_int("REQCHECK_CONTEXT_CHARS", 150_000)
-        self.segment_chunk_chars = _env_int("REQCHECK_SEGMENT_CHUNK_CHARS", 40_000)
-        self.batch_size = _env_int("REQCHECK_BATCH_SIZE", 6)
-        self.concurrency = _env_int("REQCHECK_CONCURRENCY", 1)
-        self.critic_batch = _env_int("REQCHECK_CRITIC_BATCH", 30)
+    """Параметры прогона — только из ValidationOptions (окружение ядро не читает)."""
+
+    context_chars = 150_000  # текст документа в промпте
+    segment_chunk_chars = 40_000  # фрагмент документа для нарезки
+    critic_batch = 30
+
+    def __init__(self, options: ValidationOptions) -> None:
+        self.batch_size = max(1, options.batch_size)
+        self.concurrency = max(1, options.concurrency)
 
 
 class Progress:
@@ -128,7 +124,7 @@ class Pipeline:
         self.progress = progress
         self.provider = provider
         self.model = model
-        self.s = Settings()
+        self.s = Settings(options)
         self.sections = SectionIndex(self.text)
         self.locator = QuoteLocator(self.text)
         self.system = prompts.system_prompt(options.knowledge_snippets)
@@ -154,7 +150,8 @@ class Pipeline:
             if _fatal(e) or (self.llm_ok == 0 and what == "нарезка" and not isinstance(e, LLMError)):
                 raise
             log.warning("Шаг «%s» не выполнен моделью: %s", what, e)
-            self.warnings.append(f"{what}: {shorten(str(e), 160)}")
+            # адреса серверов в отчёт не попадают
+            self.warnings.append(f"{what}: {shorten(re.sub(r'https?://\S+', '<url>', str(e)), 160)}")
             return None
 
     # ------------------------------------------------------------ нарезка

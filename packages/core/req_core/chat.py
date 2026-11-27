@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
 from typing import Any
 
@@ -11,9 +10,11 @@ from req_contracts import Report
 from .prompts import CHAT_SYSTEM
 from .render import KIND_RU, SEV_RU
 
+CHAT_DOC_CHARS = 60_000
+
 
 def report_context(report: Report, doc_limit: int | None = None) -> str:
-    doc_limit = doc_limit or int(os.environ.get("REQCHECK_CHAT_DOC_CHARS", "60000"))
+    doc_limit = doc_limit or CHAT_DOC_CHARS
     p, s, c = report.passport, report.summary, report.conclusion
     lines = [
         f"Документ: {p.document_name}; модель проверки: {p.provider}/{p.model}; дата: {p.run_at:%d.%m.%Y}.",
