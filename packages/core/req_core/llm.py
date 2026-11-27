@@ -217,6 +217,7 @@ class BaseLLM:
         self.model = cfg.model
         self.usage = Usage()
         self._lock = threading.Lock()
+        self._tl = threading.local()  # токены последнего вызова в этом потоке — для лога вызова
         self._last_call = 0.0
         self.min_interval = float(cfg.min_interval_s or 0)
         self.max_attempts = int(cfg.max_attempts or 1)
@@ -287,6 +288,7 @@ class BaseLLM:
         return nxt
 
     def add_usage(self, prompt: int | None, completion: int | None) -> None:
+        self._tl.last = (int(prompt or 0), int(completion or 0))
         with self._lock:
             self.usage.llm_calls += 1
             self.usage.prompt_tokens += int(prompt or 0)
@@ -310,12 +312,16 @@ class BaseLLM:
         if wait > 0:
             self._pause(wait, "Пауза между запросами")
 
-    def _with_retry(self, fn: Callable[[], Reply | str]) -> Reply:
+    def _with_retry(self, fn: Callable[[], Reply | str], what: str = "prompt") -> Reply:
         delay = 2.0
         for attempt in range(1, self.max_attempts + 1):
             self._throttle()
+            self._tl.last = None
+            start = time.monotonic()
             try:
-                return self._reply(fn())
+                reply = self._reply(fn())
+                self._log_call(what, start, attempt, reply)
+                return reply
             except Exception as e:  # noqa: BLE001 — классифицируем ниже
                 if attempt >= self.max_attempts or not is_retryable(e):
                     raise
@@ -325,6 +331,16 @@ class BaseLLM:
                 self._pause(wait, "Лимит запросов провайдера" if _status_of(e) == 429 else "Провайдер недоступен")
                 delay = min(delay * 2, 60.0)
         raise LLMError("unreachable")  # pragma: no cover
+
+    def _log_call(self, what: str, start: float, attempt: int, reply: Reply) -> None:
+        """Строка лога на каждый успешный вызов модели: длительность и токены (журнал прогона в аудите)."""
+        ms = int((time.monotonic() - start) * 1000)
+        prompt, completion = getattr(self._tl, "last", None) or (None, None)
+        tokens = f", токены {prompt}→{completion}" if prompt is not None else ""
+        log.info("LLM %s/%s: %s — ответ за %d мс%s", self.provider, self.model, what, ms, tokens,
+                 extra={"kind": "llm_call", "llm_provider": self.provider, "llm_model": self.model, "schema": what,
+                        "latency_ms": ms, "prompt_tokens": prompt, "completion_tokens": completion,
+                        "attempt": attempt, "truncated": reply.truncated, "reply_chars": len(reply.text or "")})
 
     @staticmethod
     def _msgs(messages: list[Any]) -> list[dict[str, str]]:
@@ -348,7 +364,7 @@ class BaseLLM:
         mode = self.json_mode()
         while True:
             try:
-                return self._with_retry(lambda m=mode: self._call(system, msgs, sch, m, limit))
+                return self._with_retry(lambda m=mode: self._call(system, msgs, sch, m, limit), sch[0])
             except Exception as e:  # noqa: BLE001
                 if not capability_rejected(e, mode):
                     raise

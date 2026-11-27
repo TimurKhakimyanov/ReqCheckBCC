@@ -16,6 +16,7 @@ import {
   setSession,
   uid,
 } from './data'
+import { mockRunLogs } from './runlogs'
 import { detail as wikiDetail, graph as wikiGraph } from './wiki'
 
 const A = (p: string) => `*/api${p}`
@@ -518,6 +519,15 @@ export const handlers = [
     }, request.signal)
   }),
 
+  http.get(
+    A('/runs/:id/logs'),
+    guard(({ params }: { params: Record<string, string> }) => {
+      const r = db.runs.find((x) => x.id === params.id)
+      if (!r) return err(404, 'Run not found', 'not_found')
+      return HttpResponse.json(mockRunLogs(materialize(r), db.audit) as unknown as JsonBodyType)
+    }),
+  ),
+
   // /runs/{id}/report.{md,pdf,docx,json} — после /findings и /chat, чтобы не перехватывать их
   http.get(
     A('/runs/:id/:file'),
@@ -741,7 +751,15 @@ export const handlers = [
       const url = new URL(request.url)
       const limit = Number(url.searchParams.get('limit') ?? 50)
       const offset = Number(url.searchParams.get('offset') ?? 0)
-      return HttpResponse.json({ items: db.audit.slice(offset, offset + limit) as unknown as JsonBodyType, total: db.audit.length })
+      const action = url.searchParams.get('action')
+      const q = url.searchParams.get('q')?.trim().toLowerCase()
+      const items = db.audit.filter(
+        (a) =>
+          (!action || a.action === action) &&
+          (!q || [a.actor, a.action, a.target ?? '', JSON.stringify(a.details ?? {})].some((v) => v.toLowerCase().includes(q))),
+      )
+      const actions = [...new Set(db.audit.map((a) => a.action))].sort()
+      return HttpResponse.json({ items: items.slice(offset, offset + limit) as unknown as JsonBodyType, total: items.length, actions })
     }),
   ),
 ]

@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Query
-from sqlalchemy import func, select, text
+from sqlalchemy import String, cast, func, or_, select, text
 from starlette.concurrency import run_in_threadpool
 
 from ..app_settings import read_app_settings
@@ -85,9 +85,26 @@ def usage(_: CurrentUser, db: DB, from_: date | None = Query(None, alias="from")
                     by_day=[by_day[d] for d in sorted(by_day)])
 
 
+def audit_entry(r: AuditLog) -> AuditEntry:
+    return AuditEntry(id=r.id, ts=r.ts, actor=r.actor, action=r.action, target=r.target, details=r.details or {},
+                      ip=r.ip)
+
+
 @router.get("/audit", response_model=AuditList)
-def audit_log(_: CurrentUser, db: DB, limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)) -> AuditList:
-    total = db.scalar(select(func.count()).select_from(AuditLog)) or 0
-    rows = db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(limit).offset(offset)).all()
-    return AuditList(items=[AuditEntry(id=r.id, ts=r.ts, actor=r.actor, action=r.action, target=r.target,
-                                       details=r.details or {}) for r in rows], total=total)
+def audit_log(_: CurrentUser, db: DB, limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
+              action: str | None = Query(None, max_length=64), actor: str | None = Query(None, max_length=150),
+              q: str | None = Query(None, max_length=200, description="Подстрока в цели, пользователе или деталях")
+              ) -> AuditList:
+    stmt = select(AuditLog)
+    if action:
+        stmt = stmt.where(AuditLog.action == action)
+    if actor:
+        stmt = stmt.where(AuditLog.actor == actor)
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(or_(AuditLog.target.ilike(like), AuditLog.actor.ilike(like), AuditLog.action.ilike(like),
+                              cast(AuditLog.details, String).ilike(like)))
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = db.scalars(stmt.order_by(AuditLog.id.desc()).limit(limit).offset(offset)).all()
+    actions = list(db.scalars(select(AuditLog.action).distinct().order_by(AuditLog.action)).all())
+    return AuditList(items=[audit_entry(r) for r in rows], total=total, actions=actions)

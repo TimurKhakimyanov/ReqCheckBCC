@@ -90,6 +90,8 @@ export interface ProviderTestResult {
   error?: string | null
   /** Модели, которые вернул провайдер при проверке (живой список). Заполняется и при ok: false. */
   models?: string[]
+  /** Модель, на которой выполнена проверка */
+  model?: string | null
   /** Есть ли модель по умолчанию в этом списке; null — неизвестно */
   default_model_valid?: boolean | null
   /** Предупреждение бэкенда (напр., модель по умолчанию недоступна) */
@@ -372,11 +374,43 @@ export interface AuditEntry {
   action: string
   target: string | null
   details: Record<string, unknown> | string | null
+  ip?: string | null
 }
 
 export interface Page<T> {
   items: T[]
   total: number
+}
+
+export interface AuditPage extends Page<AuditEntry> {
+  /** Все действия в журнале — для фильтра */
+  actions?: string[]
+}
+
+export type LogLevel = 'debug' | 'info' | 'warning' | 'error' | 'critical'
+/** progress — событие агента; core/llm — ядро (llm — вызов модели); worker; system */
+export type LogSource = 'progress' | 'core' | 'llm' | 'worker' | 'system'
+
+/** Строка журнала прогона (GET /runs/{id}/logs) */
+export interface RunLogEntry {
+  id: number
+  ts: string
+  level: LogLevel
+  source: LogSource | string
+  /** Агент (этап), во время которого сделана запись */
+  stage: RunStage | null
+  message: string
+  current?: number | null
+  total?: number | null
+  data: Record<string, unknown>
+}
+
+export interface RunLogs {
+  run: Run
+  items: RunLogEntry[]
+  /** Действия пользователей над прогоном (запуск, отмена, разбор дефектов) */
+  audit: AuditEntry[]
+  truncated: boolean
 }
 
 export interface Health {

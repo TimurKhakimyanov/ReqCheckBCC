@@ -3,7 +3,7 @@ import { readSSE } from './sse'
 import type {
   AppSettings,
   AppSettingsUpdate,
-  AuditEntry,
+  AuditPage,
   ChatMessage,
   DocumentItem,
   ExportFormat,
@@ -25,6 +25,7 @@ import type {
   ReviewStatus,
   Run,
   RunCreate,
+  RunLogs,
   SearchHit,
   UsageResponse,
   User,
@@ -169,6 +170,7 @@ export const api = {
   runs: (params: { document_id?: string; status?: string; limit?: number; offset?: number } = {}) =>
     request<Page<Run>>(`/runs${qs(params)}`),
   run: (id: string) => request<Run>(`/runs/${id}`),
+  runLogs: (id: string) => request<RunLogs>(`/runs/${id}/logs`),
   createRun: (body: RunCreate) => request<Run>('/runs', { method: 'POST', json: body }),
   cancelRun: (id: string) => request<Run>(`/runs/${id}/cancel`, { method: 'POST' }),
   deleteRun: (id: string) => request<void>(`/runs/${id}`, { method: 'DELETE' }),
@@ -204,7 +206,8 @@ export const api = {
   // --- service
   health: () => request<Health>('/health'),
   usage: (params: { from?: string; to?: string } = {}) => request<UsageResponse>(`/usage${qs(params)}`),
-  audit: (params: { limit?: number; offset?: number } = {}) => request<Page<AuditEntry>>(`/audit${qs(params)}`),
+  audit: (params: { limit?: number; offset?: number; action?: string; q?: string } = {}) =>
+    request<AuditPage>(`/audit${qs(params)}`),
 }
 
 function unwrapUser(r: { user: User } | User): User {

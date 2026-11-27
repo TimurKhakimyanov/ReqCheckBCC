@@ -12,7 +12,7 @@ from app import testing
 from app.db import SessionLocal
 from app.indexing import index_report
 from app.knowledge import ensure_builtin
-from app.models import ReportRow, Run
+from app.models import ReportRow, Run, RunLog
 from app.serialize import summary_from_report
 from app.services import run_cancel_key, run_events_channel
 from req_contracts import ProgressEvent, Report, RunStage
@@ -406,6 +406,36 @@ async def test_usage_and_audit(client):
     actions = {i["action"] for i in r.json()["items"]}
     assert {"login", "login_failed", "provider_updated", "document_uploaded", "run_created", "run_cancelled",
             "finding_reviewed"} <= actions
+
+
+async def test_audit_filters_and_run_logs(client):
+    r = await client.get("/api/audit", params={"action": "run_created"})
+    body = r.json()
+    assert body["items"] and all(i["action"] == "run_created" for i in body["items"])
+    assert "login" in body["actions"] and "run_created" in body["actions"]
+    r = await client.get("/api/audit", params={"q": state["doc"]["id"]})
+    assert {i["action"] for i in r.json()["items"]} >= {"document_uploaded"}
+
+    run_id = state["run"]["id"]
+    with SessionLocal() as db:
+        rid = uuid.UUID(run_id)
+        db.add_all([
+            RunLog(run_id=rid, level="info", source="progress", stage="parsing", message="Загрузка документа"),
+            RunLog(run_id=rid, level="info", source="llm", stage="checking_requirements",
+                   message="LLM gemini/x: ответ за 900 мс", data={"kind": "llm_call", "latency_ms": 900}),
+            RunLog(run_id=rid, level="warning", source="core", stage="bogus", message="странная стадия"),
+        ])
+        db.commit()
+    r = await client.get(f"/api/runs/{run_id}/logs")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["run"]["id"] == run_id and body["truncated"] is False
+    assert [i["source"] for i in body["items"]] == ["progress", "llm", "core"]
+    assert body["items"][1]["data"]["latency_ms"] == 900
+    assert body["items"][2]["stage"] is None  # неизвестная стадия не ломает ответ
+    assert {"run_created", "finding_reviewed"} <= {a["action"] for a in body["audit"]}
+    assert (await client.get(f"/api/runs/{run_id}/logs", params={"limit": 1})).json()["truncated"] is True
+    assert (await client.get(f"/api/runs/{uuid.uuid4()}/logs")).status_code == 404
 
 
 async def test_delete_document(client, services):

@@ -18,38 +18,50 @@ describe('parseJsonObject', () => {
   })
 })
 
+type User = ReturnType<typeof userEvent.setup>
+
+/** Мастер изменения локальной модели, открытый на шаге «Параметры» (расширенные поля там раскрыты сразу). */
+async function openParams(user: User) {
+  const tile = await screen.findByTestId('provider-openai_compatible')
+  await user.click(within(tile).getByRole('button', { name: 'Изменить' }))
+  const dialog = await screen.findByRole('dialog')
+  await user.click(within(dialog).getByRole('button', { name: /Далее/ })) // учётная запись → модель
+  await user.click(within(dialog).getByRole('button', { name: /Далее/ })) // модель → параметры
+  expect(within(dialog).getByText('Параметры запросов')).toBeInTheDocument()
+  return dialog
+}
+
 describe('Advanced provider parameters', () => {
   it('applies the vLLM preset and saves extra_body, set-review override and max tokens', async () => {
     const user = userEvent.setup()
     renderWithProviders(<SettingsPage />)
-    const card = await screen.findByTestId('provider-openai_compatible')
-    await user.click(within(card).getByText('Расширенные'))
-    await user.click(within(card).getByRole('button', { name: /vLLM: без рассуждений/ }))
-    expect(within(card).getByLabelText('Макс. токенов ответа')).toHaveValue(48000)
-    expect(within(card).getByLabelText('Таймаут запроса, с')).toHaveValue(900)
-    await user.click(within(card).getByRole('button', { name: 'Сохранить' }))
+    const dialog = await openParams(user)
+    await user.click(within(dialog).getByRole('button', { name: /vLLM: без рассуждений/ }))
+    expect(within(dialog).getByLabelText('Макс. токенов ответа')).toHaveValue(48000)
+    expect(within(dialog).getByLabelText('Таймаут запроса, с')).toHaveValue(900)
+    await user.click(within(dialog).getByRole('button', { name: /Далее/ }))
+    await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
     await waitFor(() => expect(db.providers.openai_compatible.max_output_tokens).toBe(48000))
     expect(db.providers.openai_compatible.timeout_s).toBe(900)
     expect(db.providers.openai_compatible.extra_body).toEqual({ chat_template_kwargs: { enable_thinking: false } })
     expect(db.providers.openai_compatible.extra_body_set_review).toEqual({ chat_template_kwargs: { enable_thinking: true } })
   })
 
-  it('blocks saving invalid JSON and explains why', async () => {
+  it('blocks going on with invalid JSON and explains why', async () => {
     const user = userEvent.setup()
     renderWithProviders(<SettingsPage />)
-    const card = await screen.findByTestId('provider-openai_compatible')
-    await user.click(within(card).getByText('Расширенные'))
-    const field = within(card).getByLabelText('Доп. параметры запроса (JSON)')
+    const dialog = await openParams(user)
+    const field = within(dialog).getByLabelText('Доп. параметры запроса (JSON)')
     await user.click(field)
     await user.paste('{"chat_template_kwargs": ')
-    expect(within(card).getByText(/Это не JSON/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Это не JSON/)).toBeInTheDocument()
     expect(field).toHaveAttribute('aria-invalid', 'true')
-    expect(within(card).getByRole('button', { name: 'Сохранить' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: /Далее/ })).toBeDisabled()
     await user.clear(field)
     await user.paste('[1]')
-    expect(within(card).getByText(/Нужен JSON-объект/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Нужен JSON-объект/)).toBeInTheDocument()
     await user.clear(field)
-    expect(within(card).getByRole('button', { name: 'Сохранить' })).toBeEnabled()
+    expect(within(dialog).getByRole('button', { name: /Далее/ })).toBeEnabled()
   })
 
   it('validates the request timeout and sends unsaved extras with the connection test', async () => {
@@ -62,16 +74,16 @@ describe('Advanced provider parameters', () => {
       }),
     )
     renderWithProviders(<SettingsPage />)
-    const card = await screen.findByTestId('provider-openai_compatible')
-    await user.click(within(card).getByText('Расширенные'))
-    const timeout = within(card).getByLabelText('Таймаут запроса, с')
+    const dialog = await openParams(user)
+    const timeout = within(dialog).getByLabelText('Таймаут запроса, с')
     expect(timeout).toHaveAttribute('placeholder', '180')
     await user.type(timeout, '5')
-    expect(within(card).getByText('Целое число от 10 до 3600')).toBeInTheDocument()
-    expect(within(card).getByRole('button', { name: 'Сохранить' })).toBeDisabled()
+    expect(within(dialog).getByText('Целое число от 10 до 3600')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /Далее/ })).toBeDisabled()
     await user.clear(timeout)
     await user.type(timeout, '600')
-    await user.click(within(card).getByRole('button', { name: /Проверить подключение/ }))
+    await user.click(within(dialog).getByRole('button', { name: /Далее/ }))
+    await user.click(within(dialog).getByRole('button', { name: /Проверить подключение/ }))
     await waitFor(() => expect(testBody).toMatchObject({ timeout_s: 600, extra_body: null }))
   })
 })

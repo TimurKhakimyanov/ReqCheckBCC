@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import logging
 import re
 import threading
@@ -119,6 +120,12 @@ class Progress:
         self(self.stage, self.last, message)
 
 
+def _ctx_map(ex: ThreadPoolExecutor, fn: Any, items: list[Any]) -> Any:
+    """ex.map с контекстом вызывающего потока (contextvars): воркер по нему относит логи к своему прогону."""
+    ctxs = [contextvars.copy_context() for _ in items]
+    return ex.map(lambda c, x: c.run(fn, x), ctxs, items)
+
+
 FOREIGN_SCRIPT = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]+")
 
 
@@ -219,7 +226,7 @@ class Pipeline:
         if self.s.concurrency > 1 and len(items) > 1:
             ex = ThreadPoolExecutor(min(self.s.concurrency, len(items)))
             try:
-                return list(ex.map(fn, items))
+                return list(_ctx_map(ex, fn, items))
             finally:
                 ex.shutdown(wait=self.progress.aborted is None, cancel_futures=True)
         return [fn(x) for x in items]
@@ -389,7 +396,7 @@ class Pipeline:
         if self.s.concurrency > 1 and len(batches) > 1:
             ex = ThreadPoolExecutor(self.s.concurrency)
             try:
-                for b, res in zip(batches, ex.map(run, batches)):
+                for b, res in zip(batches, _ctx_map(ex, run, batches)):
                     results.append(res)
                     report_batch(b)
             finally:  # при отмене не ждём оставшиеся пакеты

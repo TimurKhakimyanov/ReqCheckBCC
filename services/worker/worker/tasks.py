@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import tempfile
 import threading
@@ -24,6 +25,7 @@ from app.services import TASK_RUN_VALIDATION, Services, get_services, run_cancel
 from app.vectors import KNOWLEDGE
 from req_contracts import ProgressEvent, Report, RunStage, ValidationOptions
 
+from . import runlog
 from .celery_app import celery
 from .metrics import (
     FINDINGS,
@@ -68,8 +70,9 @@ class RunTimedOut(Exception):
 class Progress:
     """Публикует события в Redis и обновляет строку прогона; бросает RunCancelled, если прогон отменили."""
 
-    def __init__(self, svc: Services, run_id: str):
+    def __init__(self, svc: Services, run_id: str, sink: runlog.RunLogSink | None = None):
         self.svc = svc
+        self.sink = sink
         self.run_id = run_id
         self.rid = uuid.UUID(run_id)
         self._last_db_write = 0.0
@@ -120,6 +123,8 @@ class Progress:
                 self.svc.redis.publish(run_events_channel(self.run_id), event.model_dump_json())
             except Exception:  # noqa: BLE001
                 log.warning("redis publish failed", exc_info=True)
+        if self.sink is not None:
+            self.sink.progress(event)
 
     def on_core_progress(self, event: ProgressEvent) -> None:
         """Callback для ядра. Финальные стадии ядра не пересылаются: «done» публикует воркер после сохранения."""
@@ -174,7 +179,7 @@ def knowledge_snippets(svc: Services, path: Path, name: str, limit: int = 6) -> 
 def run_with_watchdog(fn: Callable[[], Report], progress: Progress, timeout_s: int) -> Report:
     """Ядро работает в отдельном потоке; здесь — проверка отмены и общего таймаута раз в секунду."""
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"core-{progress.run_id[:8]}")
-    future = pool.submit(fn)
+    future = pool.submit(contextvars.copy_context().run, fn)  # журнал прогона — по контексту
     deadline = time.monotonic() + timeout_s
     try:
         while True:
@@ -224,16 +229,30 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
     settings = read_app_settings()  # таймаут и параметры прогона — из админки
     rid = uuid.UUID(run_id)
     started = time.monotonic()
-    progress = Progress(svc, run_id)
+    sink = runlog.RunLogSink(run_id)
+    runlog.install()
+    token = runlog.CURRENT.set(sink)
+    try:
+        return _execute_run(run_id, svc, settings, rid, started, sink)
+    finally:
+        sink.close()
+        runlog.CURRENT.reset(token)
+
+
+def _execute_run(run_id: str, svc: Services, settings, rid: uuid.UUID, started: float,
+                 sink: runlog.RunLogSink) -> str:
+    progress = Progress(svc, run_id, sink)
     provider = "unknown"
     lg = _RunLog(log, {"run_id": run_id})
 
     with SessionLocal() as db:
         run = db.get(Run, rid)
         if run is None:
+            sink.closed = True  # строки прогона нет — писать журнал некуда
             lg.warning("run not found; skipping")
             return "missing"
         if run.status in TERMINAL:
+            sink.closed = True  # повторная доставка задачи: журнал завершённого прогона не трогаем
             lg.info("run already finished; skipping", extra={"status": run.status})
             return run.status
         if run.status != RunStage.QUEUED.value:
@@ -249,6 +268,7 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
             cfg = build_provider_config(db, provider, model, require_enabled=False)
         except ProviderNotConfigured as e:
             error = str(e)
+            sink.add("error", "worker", f"Провайдер не настроен: {error}", data={"provider": provider, "model": model})
             _finish(rid, RunStage.FAILED, error=error)
             progress.emit(RunStage.FAILED, 0.0, error)
             RUNS_FINISHED.labels("failed", provider).inc()
@@ -260,11 +280,16 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
     status = RunStage.FAILED
     try:
         lg.info("run started", extra={"provider": provider, "model": model, "document": doc_name})
+        sink.add("info", "worker", f"Прогон запущен: {provider}/{model}, документ «{doc_name}»",
+                 data={"provider": provider, "model": model, "document": doc_name, "options": options.model_dump(mode="json"),
+                       "run_timeout_s": run_timeout, "request_timeout_s": cfg.timeout_s})
         progress.emit(RunStage.PARSING, 0.01, "Загрузка документа", force_db=True)
         with tempfile.TemporaryDirectory(prefix="reqcheck-") as tmp:
             path = Path(tmp) / Path(doc_name).name
             svc.store.download_to(doc_key, path)
             extra = knowledge_snippets(svc, path, doc_name)
+            sink.add("info", "worker", f"База знаний: найдено фрагментов — {len(extra)}",
+                     data={"snippets": [x[:200] for x in extra]})
             if extra:
                 options = options.model_copy(update={"knowledge_snippets": [*options.knowledge_snippets, *extra]})
             report = run_with_watchdog(
@@ -282,6 +307,7 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
                 key = f"reports/{run_id}/report.{fmt}"
                 svc.store.put(key, req_core.render_report(report, fmt), ctype)  # type: ignore[arg-type]
                 artifacts[fmt] = key
+                sink.add("info", "worker", f"Отчёт {fmt.upper()} выгружен", data={"key": key})
             except Exception:  # noqa: BLE001 — JSON-отчёт важнее выгрузок; формат отрисуется по запросу
                 lg.warning("export failed", extra={"format": fmt}, exc_info=True)
 
@@ -301,6 +327,10 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
             lg.warning("indexing failed", exc_info=True)
 
         message = f"Готово: требований {report.summary.requirements_total}, дефектов {report.summary.findings_total}"
+        u = report.usage
+        sink.add("info", "worker",
+                 f"Итог: вызовов LLM {u.llm_calls}, токены {u.prompt_tokens}→{u.completion_tokens}, "
+                 f"{time.monotonic() - started:.0f} с", data=u.model_dump(mode="json"))
         if _finish(rid, RunStage.DONE, message=message):
             status = RunStage.DONE
             _record_usage_metrics(provider, model, report)
