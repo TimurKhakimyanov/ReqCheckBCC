@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field, SecretStr
 
@@ -34,6 +35,16 @@ class ProviderConfig(BaseModel):
     timeout_s: float = 180.0
     min_interval_s: float = Field(default=0.0, ge=0, description="Пауза между вызовами (бесплатные тарифы, 429)")
     max_attempts: int = Field(default=6, ge=1, description="Попыток на вызов при 429/5xx/сетевых ошибках")
+    extra_body: dict[str, Any] | None = Field(
+        default=None,
+        description="Доп. поля тела запроса (OpenAI-совместимые серверы), напр. "
+        '{"chat_template_kwargs": {"enable_thinking": false}} — отключить рассуждения у vLLM-модели',
+    )
+    extra_body_set_review: dict[str, Any] | None = Field(
+        default=None,
+        description="Переопределение extra_body для проверки набора (поиск противоречий), напр. включить рассуждения. "
+        "None — используется extra_body",
+    )
 
 
 class EmbeddingProviderName(str, Enum):
