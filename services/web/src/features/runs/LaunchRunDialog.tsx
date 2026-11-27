@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { api } from '@/api/client'
 import type { DocumentItem, ProviderId, ValidationOptions } from '@/api/types'
-import { DEFAULT_OPTIONS } from '@/api/types'
+import { DEFAULT_OPTIONS, isProviderConfigured } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Checkbox, Label, NativeSelect } from '@/components/ui/input'
@@ -58,7 +58,7 @@ export function LaunchRunDialog({
   useEffect(() => {
     if (!providers.data) return
     if (provider && usable.some((p) => p.provider === provider)) return
-    const pick = usable.find((p) => p.has_key) ?? usable[0]
+    const pick = usable.find(isProviderConfigured) ?? usable[0]
     setProvider(pick?.provider)
     setModel(pick?.default_model ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -88,7 +88,7 @@ export function LaunchRunDialog({
     },
   })
 
-  const noKey = current && !current.has_key && current.provider !== 'openai_compatible'
+  const noKey = current && !isProviderConfigured(current)
   const opt = (k: keyof ValidationOptions) => (k === 'language' ? null : (
     <label key={k} className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/50">
       <Checkbox
@@ -144,7 +144,7 @@ export function LaunchRunDialog({
                   {usable.map((p) => (
                     <option key={p.provider} value={p.provider}>
                       {t(`provider.${p.provider}`)}
-                      {!p.has_key && p.provider !== 'openai_compatible' ? ` — ${t('launch.noKeyShort')}` : ''}
+                      {!isProviderConfigured(p) ? ` — ${t('launch.noKeyShort')}` : ''}
                     </option>
                   ))}
                 </NativeSelect>

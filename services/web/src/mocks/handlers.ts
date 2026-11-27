@@ -2,8 +2,9 @@
 import { delay, http, HttpResponse, type JsonBodyType, type PathParams } from 'msw'
 import { formatSSE } from '@/api/sse'
 import type { DocumentFormat, ExportFormat, FindingReview, ProviderId, ReviewStatus, RunCreate } from '@/api/types'
-import { isTerminal, PROVIDERS } from '@/api/types'
+import { isProviderConfigured, isTerminal, PROVIDERS } from '@/api/types'
 import {
+  probeProvider,
   chatAnswer,
   db,
   logAudit,
@@ -165,26 +166,26 @@ export const handlers = [
   ),
   http.post(
     A('/providers/:provider/test'),
-    guard(async ({ params }: { params: Record<string, string> }) => {
+    guard(async ({ request, params }) => {
       const p = db.providers[params.provider as ProviderId]
-      if (!p) return err(404, 'Unknown provider')
-      await delay(import.meta.env.MODE === 'test' ? 0 : 700)
-      const ok = p.has_key
-      return HttpResponse.json({
-        ok,
-        latency_ms: ok ? 412 : 3,
-        error: ok ? null : p.provider === 'openai_compatible' ? `Нет соединения с ${p.base_url}` : 'API-ключ не задан',
-      })
+      if (!p) return err(404, 'Unknown provider', 'not_found')
+      // тело — ещё не сохранённые поля формы; пустые поля берутся из сохранённых настроек
+      const body = ((await request.json().catch(() => ({}))) ?? {}) as { api_key?: string; base_url?: string }
+      await delay(import.meta.env.MODE === 'test' ? 0 : 600)
+      const key = body.api_key || p._key || (p.has_key ? 'saved-key-a1b2' : undefined)
+      const res = probeProvider(p.provider, key, body.base_url ?? p.base_url)
+      return HttpResponse.json({ ok: res.ok, latency_ms: res.ok ? 412 : 35, error: res.error ?? null, models: res.models })
     }),
   ),
   http.get(
     A('/providers/:provider/models'),
-    guard(({ params }: { params: Record<string, string> }) => {
+    guard(({ params }) => {
       const p = db.providers[params.provider as ProviderId]
-      const models = MODELS[params.provider as ProviderId]
-      if (!p || !models) return err(404, 'Unknown provider', 'not_found')
-      // как бэкенд: без доступа к провайдеру — список-подсказка и текст ошибки, но всегда 200
-      return HttpResponse.json(p.has_key ? { models } : { models, error: 'API-ключ не задан — показан список по умолчанию' })
+      if (!p) return err(404, 'Unknown provider', 'not_found')
+      // как бэкенд: всегда 200; без доступа к провайдеру — список-подсказка и текст ошибки
+      const res = probeProvider(p.provider, p._key || (p.has_key ? 'saved-key-a1b2' : undefined), p.base_url)
+      if (res.ok) return HttpResponse.json({ models: res.models })
+      return HttpResponse.json({ models: MODELS[p.provider], error: res.error })
     }),
   ),
 
@@ -280,10 +281,10 @@ export const handlers = [
       // provider/model необязательны: по умолчанию — первый провайдер с ключом и его модель
       const prov = body.provider
         ? db.providers[body.provider as ProviderId]
-        : PROVIDERS.map((p) => db.providers[p]).find((p) => p.enabled && p.has_key)
+        : PROVIDERS.map((p) => db.providers[p]).find((p) => p.enabled && isProviderConfigured(p))
       if (!prov) return err(400, 'Нет провайдера с ключом. Добавьте ключ в кабинете.', 'provider_not_configured')
-      if (!prov.has_key && prov.provider !== 'openai_compatible')
-        return err(400, `У провайдера ${prov.provider} не задан API-ключ. Добавьте его в кабинете.`, 'provider_not_configured')
+      if (!isProviderConfigured(prov))
+        return err(400, `Провайдер ${prov.provider} не настроен: задайте ключ (или адрес для локальной модели) в кабинете.`, 'provider_not_configured')
       const model = body.model || prov.default_model || MODELS[prov.provider][0]
       const run = newRun(doc, prov.provider, model, body.options ?? {})
       logAudit('run.create', run.id, { provider: prov.provider, model })

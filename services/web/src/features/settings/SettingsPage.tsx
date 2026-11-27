@@ -1,139 +1,18 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, PlugZap, Save } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
-import type { ProviderSettings, ProviderTestResult } from '@/api/types'
 import { useMe } from '@/app/auth'
 import { useChangeLanguage } from '@/components/layout/Preferences'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Checkbox, Input, Label, NativeSelect } from '@/components/ui/input'
+import { Input, Label, NativeSelect } from '@/components/ui/input'
 import { ErrorNote, PageHeader, Skeleton, Spinner } from '@/components/ui/misc'
-import { useModels, useProviders } from '@/features/runs/LaunchRunDialog'
+import { useProviders } from '@/features/runs/LaunchRunDialog'
 import { languages } from '@/i18n'
-import { formatDate } from '@/shared/format'
 import { useTheme, type ThemeMode } from '@/theme/theme'
-
-function ProviderCard({ p }: { p: ProviderSettings }) {
-  const { t } = useTranslation()
-  const qc = useQueryClient()
-  const [apiKey, setApiKey] = useState('')
-  const [baseUrl, setBaseUrl] = useState(p.base_url ?? '')
-  const [enabled, setEnabled] = useState(p.enabled)
-  const [model, setModel] = useState(p.default_model ?? '')
-  const [test, setTest] = useState<ProviderTestResult | null>(null)
-  const models = useModels(p.provider)
-
-  const save = useMutation({
-    mutationFn: (body: Parameters<typeof api.updateProvider>[1]) => api.updateProvider(p.provider, body),
-    onSuccess: (np) => {
-      qc.setQueryData<ProviderSettings[]>(['providers'], (xs) => xs?.map((x) => (x.provider === np.provider ? np : x)))
-      void qc.invalidateQueries({ queryKey: ['models', p.provider] })
-      setApiKey('')
-      toast.success(t('settings.saved'))
-    },
-    onError: (e) => toast.error(e.message),
-  })
-  const check = useMutation({ mutationFn: () => api.testProvider(p.provider), onSuccess: setTest, onError: (e) => setTest({ ok: false, latency_ms: 0, error: e.message }) })
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    save.mutate({
-      enabled,
-      default_model: model,
-      ...(apiKey ? { api_key: apiKey } : {}),
-      ...(p.provider === 'openai_compatible' ? { base_url: baseUrl } : {}),
-    })
-  }
-
-  return (
-    <Card className="min-w-0">
-      <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle>{t(`provider.${p.provider}`)}</CardTitle>
-          {p.has_key ? (
-            <Badge variant="success">
-              <KeyRound />
-              {p.key_hint}
-            </Badge>
-          ) : (
-            <Badge variant="secondary">{t('settings.noKey')}</Badge>
-          )}
-        </div>
-        <CardDescription>{t(`settings.providerHint.${p.provider}`)}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form className="grid gap-3" onSubmit={submit}>
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            {t('settings.enabled')}
-          </label>
-          <div className="grid gap-1.5">
-            <Label htmlFor={`key-${p.provider}`}>{t('settings.apiKey')}</Label>
-            <Input
-              id={`key-${p.provider}`}
-              type="password"
-              autoComplete="off"
-              placeholder={p.has_key ? t('settings.keyKeep', { hint: p.key_hint }) : t('settings.keyEnter')}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-            />
-          </div>
-          {p.provider === 'openai_compatible' && (
-            <div className="grid gap-1.5">
-              <Label htmlFor={`url-${p.provider}`}>{t('settings.baseUrl')}</Label>
-              <Input id={`url-${p.provider}`} value={baseUrl} placeholder="http://ollama:11434/v1" onChange={(e) => setBaseUrl(e.target.value)} />
-            </div>
-          )}
-          <div className="grid gap-1.5">
-            <Label htmlFor={`model-${p.provider}`}>{t('settings.defaultModel')}</Label>
-            <NativeSelect id={`model-${p.provider}`} value={model} onChange={(e) => setModel(e.target.value)}>
-              {!models.data?.models.includes(model) && <option value={model}>{model || '—'}</option>}
-              {models.data?.models.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </NativeSelect>
-            {models.data?.error && (
-              <span className="text-xs text-muted-foreground" title={models.data.error}>
-                {t('launch.modelsHint')}
-              </span>
-            )}
-          </div>
-          {test && (
-            <div className={`rounded-md px-3 py-2 text-sm ${test.ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}>
-              {test.ok ? t('settings.testOk', { ms: test.latency_ms }) : t('settings.testFail', { error: test.error ?? '' })}
-            </div>
-          )}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground">
-              {p.updated_at ? t('settings.updated', { date: formatDate(p.updated_at) }) : ''}
-            </span>
-            <div className="flex flex-wrap justify-end gap-2">
-              {p.has_key && (
-                <Button type="button" variant="ghost" size="sm" onClick={() => window.confirm(t('settings.confirmRemoveKey')) && save.mutate({ api_key: '' })}>
-                  {t('settings.removeKey')}
-                </Button>
-              )}
-              <Button type="button" variant="outline" size="sm" onClick={() => check.mutate()} disabled={check.isPending}>
-                {check.isPending ? <Spinner /> : <PlugZap />}
-                {t('settings.test')}
-              </Button>
-              <Button type="submit" size="sm" disabled={save.isPending}>
-                {save.isPending ? <Spinner /> : <Save />}
-                {t('common.save')}
-              </Button>
-            </div>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
-  )
-}
+import { ProviderCard } from './ProviderCard'
 
 function PasswordCard() {
   const { t } = useTranslation()

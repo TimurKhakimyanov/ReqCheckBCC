@@ -1,5 +1,7 @@
 {
-  "_meta": { "name": "English" },
+  "_meta": {
+    "name": "English"
+  },
   "app": {
     "name": "ReqCheck",
     "mockMode": "Demo mode: mock data, no backend required"
@@ -306,8 +308,16 @@
     "textHint": "e.g. a glossary or document formatting rules",
     "builtinHint": "Built-in material cannot be deleted",
     "confirmDelete": "Delete “{{name}}” from the knowledge base?",
-    "src": { "builtin": "Built-in", "upload": "File", "manual": "Text" },
-    "st": { "indexing": "Indexing", "ready": "Ready", "failed": "Failed" }
+    "src": {
+      "builtin": "Built-in",
+      "upload": "File",
+      "manual": "Text"
+    },
+    "st": {
+      "indexing": "Indexing",
+      "ready": "Ready",
+      "failed": "Failed"
+    }
   },
   "settings": {
     "title": "Settings",
@@ -332,7 +342,7 @@
       "gemini": "Free key in Google AI Studio. A good default.",
       "openai": "Key from the OpenAI platform.",
       "anthropic": "Key from the Anthropic console.",
-      "openai_compatible": "Ollama, vLLM, LM Studio — the model runs inside your perimeter, data never leaves."
+      "openai_compatible": "Ollama, vLLM, LM Studio — the model runs inside your perimeter, data never leaves. A server address is enough."
     },
     "profile": "Profile",
     "roleAdmin": "administrator",
@@ -342,7 +352,19 @@
     "repeatPassword": "Repeat new password",
     "mismatch": "Passwords do not match",
     "changePassword": "Change password",
-    "passwordChanged": "Password changed"
+    "passwordChanged": "Password changed",
+    "apiKeyOptional": "Key (optional)",
+    "keyOptionalHint": "Only if the server requires authentication",
+    "configured": "Configured",
+    "notConfigured": "Not configured",
+    "baseUrlHint": "Address of an OpenAI-compatible API (Ollama, vLLM, LM Studio), usually ending with /v1. Models load automatically.",
+    "modelPlaceholder": "Pick from the list or type a name",
+    "probing": "Checking the connection and loading models…",
+    "modelsLive_one": "The provider returned {{count}} model",
+    "modelsLive_other": "The provider returned {{count}} models",
+    "modelsSaved_one": "{{count}} model available",
+    "modelsSaved_other": "{{count}} models available",
+    "modelsNone": "Paste a key — the model list loads automatically"
   },
   "usage": {
     "title": "Token usage",
@@ -369,23 +391,161 @@
     "details": "Details"
   },
   "criteria": {
-    "necessary": { "title": "Necessary", "short": "Necess.", "description": "States a needed capability or constraint; removing it leaves the product incomplete. If nothing breaks without it, it is superfluous." },
-    "implementation_free": { "title": "Implementation-free", "short": "Impl-free", "description": "Says what, not how: does not impose architecture, technology, storage format or protocol without a real need." },
-    "unambiguous": { "title": "Unambiguous", "short": "Unambig.", "description": "Can be read only one way: no vague words, undefined terms, unspecified units, time zones or interval bounds." },
-    "complete": { "title": "Complete", "short": "Complete", "description": "Needs no guessing: conditions, error handling and edge cases are described; no “to be defined later”." },
-    "singular": { "title": "Singular", "short": "Singular", "description": "One requirement — one capability or constraint; no “and/or” bundling several behaviours." },
-    "feasible": { "title": "Feasible", "short": "Feasible", "description": "Achievable within reasonable technical, time and budget constraints." },
-    "verifiable": { "title": "Verifiable", "short": "Verif.", "description": "A finite objective way (test, analysis, inspection) exists to prove it; measurable criteria are given." },
-    "correct": { "title": "Correct", "short": "Correct", "description": "Accurately reflects the stakeholder need and the domain; contains no factual errors." },
-    "conforming": { "title": "Conforming", "short": "Conform.", "description": "Follows the agreed template and style of the document." },
-    "traceable": { "title": "Traceable", "short": "Trace.", "description": "Has an identifier and a clear source; tests and child documents can refer to it." },
-    "set_complete": { "title": "Complete (set)", "short": "Complete", "description": "The set covers all needed capabilities, errors, states and interfaces; template sections are filled in." },
-    "set_consistent": { "title": "Consistent", "short": "Consist.", "description": "Requirements do not contradict each other, acceptance criteria or child documents; terms and units are used uniformly." },
-    "set_feasible": { "title": "Feasible (set)", "short": "Feasible", "description": "The set as a whole is achievable within project constraints." },
-    "set_comprehensible": { "title": "Comprehensible", "short": "Compreh.", "description": "It is clear what the system is expected to do and how it relates to its environment." },
-    "set_validatable": { "title": "Able to be validated", "short": "Valid.", "description": "It can be shown that meeting the set satisfies the business need." },
-    "set_ranked": { "title": "Ranked", "short": "Ranked", "description": "Importance and/or stability is stated for requirements." },
-    "set_modifiable": { "title": "Modifiable", "short": "Modif.", "description": "The structure allows changes without duplication; the document is versioned." },
-    "set_traceable": { "title": "Traceable (set)", "short": "Trace.", "description": "Links between requirements, acceptance criteria and child documents can be followed." }
+    "necessary": {
+      "title": "Necessary",
+      "short": "Necess.",
+      "description": "States a needed capability or constraint; removing it leaves the product incomplete. If nothing breaks without it, it is superfluous."
+    },
+    "implementation_free": {
+      "title": "Implementation-free",
+      "short": "Impl-free",
+      "description": "Says what, not how: does not impose architecture, technology, storage format or protocol without a real need."
+    },
+    "unambiguous": {
+      "title": "Unambiguous",
+      "short": "Unambig.",
+      "description": "Can be read only one way: no vague words, undefined terms, unspecified units, time zones or interval bounds."
+    },
+    "complete": {
+      "title": "Complete",
+      "short": "Complete",
+      "description": "Needs no guessing: conditions, error handling and edge cases are described; no “to be defined later”."
+    },
+    "singular": {
+      "title": "Singular",
+      "short": "Singular",
+      "description": "One requirement — one capability or constraint; no “and/or” bundling several behaviours."
+    },
+    "feasible": {
+      "title": "Feasible",
+      "short": "Feasible",
+      "description": "Achievable within reasonable technical, time and budget constraints."
+    },
+    "verifiable": {
+      "title": "Verifiable",
+      "short": "Verif.",
+      "description": "A finite objective way (test, analysis, inspection) exists to prove it; measurable criteria are given."
+    },
+    "correct": {
+      "title": "Correct",
+      "short": "Correct",
+      "description": "Accurately reflects the stakeholder need and the domain; contains no factual errors."
+    },
+    "conforming": {
+      "title": "Conforming",
+      "short": "Conform.",
+      "description": "Follows the agreed template and style of the document."
+    },
+    "traceable": {
+      "title": "Traceable",
+      "short": "Trace.",
+      "description": "Has an identifier and a clear source; tests and child documents can refer to it."
+    },
+    "set_complete": {
+      "title": "Complete (set)",
+      "short": "Complete",
+      "description": "The set covers all needed capabilities, errors, states and interfaces; template sections are filled in."
+    },
+    "set_consistent": {
+      "title": "Consistent",
+      "short": "Consist.",
+      "description": "Requirements do not contradict each other, acceptance criteria or child documents; terms and units are used uniformly."
+    },
+    "set_feasible": {
+      "title": "Feasible (set)",
+      "short": "Feasible",
+      "description": "The set as a whole is achievable within project constraints."
+    },
+    "set_comprehensible": {
+      "title": "Comprehensible",
+      "short": "Compreh.",
+      "description": "It is clear what the system is expected to do and how it relates to its environment."
+    },
+    "set_validatable": {
+      "title": "Able to be validated",
+      "short": "Valid.",
+      "description": "It can be shown that meeting the set satisfies the business need."
+    },
+    "set_ranked": {
+      "title": "Ranked",
+      "short": "Ranked",
+      "description": "Importance and/or stability is stated for requirements."
+    },
+    "set_modifiable": {
+      "title": "Modifiable",
+      "short": "Modif.",
+      "description": "The structure allows changes without duplication; the document is versioned."
+    },
+    "set_traceable": {
+      "title": "Traceable (set)",
+      "short": "Trace.",
+      "description": "Links between requirements, acceptance criteria and child documents can be followed."
+    }
+  },
+  "providerError": {
+    "providerSays": "Provider says",
+    "details": "Details",
+    "openSettings": "Open provider settings",
+    "openParams": "Open AI parameters",
+    "auth": {
+      "title": "The provider rejected the API key",
+      "hint": "Check the key in Settings: it may be truncated, revoked or issued for another project."
+    },
+    "forbidden": {
+      "title": "No access to the model",
+      "hint": "The key works, but the account has no access to this model or region. Pick another model or enable access in the provider console."
+    },
+    "rate_limit": {
+      "title": "Too many requests (provider limit)",
+      "hint": "Free tiers limit requests per minute. Increase the pause between calls (5–10 s), set concurrency to 1 and run again."
+    },
+    "quota": {
+      "title": "Quota exhausted or billing missing",
+      "hint": "The daily limit or account balance has run out. Top up, wait for the quota reset or switch provider."
+    },
+    "not_found": {
+      "title": "Model or address not found",
+      "hint": "The provider has no model with this name, or the server address is wrong. Pick a model from the list in Settings."
+    },
+    "bad_request": {
+      "title": "The provider rejected the request",
+      "hint": "Usually a parameter the selected model does not support. Try another model; if it persists, pass the details to an administrator."
+    },
+    "context": {
+      "title": "The document does not fit the model context",
+      "hint": "Reduce the batch size in AI parameters or pick a model with a larger context."
+    },
+    "timeout": {
+      "title": "The model did not answer in time",
+      "hint": "Local and reasoning models are slow. Increase the request timeout in AI parameters or reduce the batch size."
+    },
+    "connection": {
+      "title": "Cannot reach the provider",
+      "hint": "The model server is unreachable from ReqCheck. Check the base URL, the server and the proxy."
+    },
+    "unavailable": {
+      "title": "The provider is temporarily unavailable",
+      "hint": "The provider is overloaded or failing. Wait a couple of minutes and run again; you can also raise the number of attempts."
+    },
+    "invalid_output": {
+      "title": "The model returned malformed output",
+      "hint": "Weaker models sometimes break JSON. Reduce the batch size, raise the attempts or pick a stronger model."
+    },
+    "not_configured": {
+      "title": "The provider is not configured",
+      "hint": "Set a key (for a local model — the server address) in Settings."
+    },
+    "not_implemented": {
+      "title": "This agent feature is not ready yet",
+      "hint": "This part of the core is not implemented on the server yet. Tell an administrator."
+    },
+    "cancelled": {
+      "title": "Run cancelled",
+      "hint": "The run was stopped by a user or by timeout. You can run it again."
+    },
+    "unknown": {
+      "title": "Error while calling the model",
+      "hint": "See the details below. If it persists, pass them to an administrator."
+    }
   }
 }

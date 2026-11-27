@@ -15,6 +15,12 @@ import type {
   User,
 } from '@/api/types'
 
+/** Как сейчас приходит от бэкенда: сырой текст исключения SDK. Веб показывает его в «Подробностях». */
+export const RAW_400 =
+  "BadRequestError: Error code: 400 - {'error': {'message': \"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.\", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}"
+export const RAW_401 =
+  "AuthenticationError: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-bad***. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key'}}"
+
 export const sampleReport = sampleJson as unknown as Report
 
 export const MOCK_USERNAME = 'admin'
@@ -111,8 +117,8 @@ function seed(): Db {
     created_at: ago(200),
     started_at: ago(200),
     finished_at: ago(199),
-    error: 'Провайдер отклонил ключ (401). Проверьте API-ключ в кабинете.',
-    message: 'Провайдер отклонил ключ (401). Проверьте API-ключ в кабинете.',
+    error: RAW_400,
+    message: RAW_400,
     usage: { llm_calls: 3, prompt_tokens: 5100, completion_tokens: 0, cost_usd: 0.002, duration_s: 8.1 },
     summary: null,
   }
@@ -139,7 +145,7 @@ function seed(): Db {
       gemini: { provider: 'gemini', enabled: true, has_key: true, key_hint: '…a1b2', base_url: null, default_model: 'gemini-2.5-flash', updated_at: ago(300) },
       openai: { provider: 'openai', enabled: true, has_key: false, key_hint: null, base_url: null, default_model: 'gpt-4.1-mini', updated_at: null },
       anthropic: { provider: 'anthropic', enabled: false, has_key: false, key_hint: null, base_url: null, default_model: 'claude-sonnet-4-5', updated_at: null },
-      openai_compatible: { provider: 'openai_compatible', enabled: true, has_key: false, key_hint: null, base_url: 'http://ollama:11434/v1', default_model: 'qwen2.5:7b-instruct', updated_at: ago(300) },
+      openai_compatible: { provider: 'openai_compatible', enabled: true, has_key: false, key_hint: null, base_url: 'http://vllm.example.local:8000/v1', default_model: 'local-model', updated_at: ago(300) },
     },
     documents: [doc],
     docTexts: { [docId]: sampleReport.document.text },
@@ -264,6 +270,24 @@ export function newRun(doc: DocumentItem, provider: string, model: string, optio
   doc.runs_count += 1
   doc.last_run = { id: run.id, status: 'queued', progress: 0, created_at: run.created_at }
   return run
+}
+
+/**
+ * Живой список моделей так, как его вернул бы провайдер. Для локальной модели — по адресу сервера.
+ * Ошибка — строкой, как у бэкенда.
+ */
+export function probeProvider(provider: ProviderId, apiKey: string | undefined, baseUrl: string | null | undefined): { ok: boolean; models: string[]; error?: string } {
+  if (provider === 'openai_compatible') {
+    if (!baseUrl) return { ok: false, models: [], error: 'Не задан адрес сервера (base URL)' }
+    if (!/^https?:\/\/[^\s/]+/.test(baseUrl)) return { ok: false, models: [], error: `Некорректный адрес: ${baseUrl}` }
+    if (/down|unreachable|offline/.test(baseUrl))
+      return { ok: false, models: [], error: `APIConnectionError: Connection error. [Errno -2] Name or service not known (${baseUrl})` }
+    if (/vllm\.example\.local/.test(baseUrl)) return { ok: true, models: ['local-model'] }
+    return { ok: true, models: MODELS.openai_compatible }
+  }
+  if (!apiKey) return { ok: false, models: [], error: 'API-ключ не задан' }
+  if (/^bad|invalid/i.test(apiKey) || apiKey.length < 8) return { ok: false, models: [], error: RAW_401 }
+  return { ok: true, models: MODELS[provider] }
 }
 
 export const MODELS: Record<ProviderId, string[]> = {

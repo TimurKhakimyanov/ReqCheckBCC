@@ -76,6 +76,19 @@ export interface ProviderTestResult {
   ok: boolean
   latency_ms: number
   error?: string | null
+  /** Модели, которые вернул провайдер при проверке (живой список). */
+  models?: string[]
+}
+
+/** Проверка ещё не сохранённых значений формы: ключ и/или адрес. Пустое тело — сохранённые настройки. */
+export interface ProviderTestRequest {
+  api_key?: string
+  base_url?: string
+}
+
+/** Провайдер готов к прогонам: ключ задан, а для локальной модели достаточно адреса. */
+export function isProviderConfigured(p: Pick<ProviderSettings, 'provider' | 'has_key' | 'base_url'>) {
+  return p.provider === 'openai_compatible' ? !!p.base_url : p.has_key
 }
 
 export type DocumentFormat = 'pdf' | 'docx' | 'md' | 'txt'

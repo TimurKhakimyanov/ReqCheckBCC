@@ -13,6 +13,7 @@ import type {
   Page,
   ProviderId,
   ProviderSettings,
+  ProviderTestRequest,
   ProviderTestResult,
   ProviderUpdate,
   Report,
@@ -139,7 +140,8 @@ export const api = {
   providers: () => request<ProviderSettings[]>('/providers'),
   updateProvider: (p: ProviderId, body: ProviderUpdate) =>
     request<ProviderSettings>(`/providers/${p}`, { method: 'PUT', json: body }),
-  testProvider: (p: ProviderId) => request<ProviderTestResult>(`/providers/${p}/test`, { method: 'POST' }),
+  testProvider: (p: ProviderId, body: ProviderTestRequest = {}, signal?: AbortSignal) =>
+    request<ProviderTestResult>(`/providers/${p}/test`, { method: 'POST', json: body, signal }),
   models: (p: ProviderId) => request<ModelsResponse>(`/providers/${p}/models`),
 
   // --- documents
