@@ -1,12 +1,11 @@
-import { Check, CheckCircle2, Minus, X, XCircle } from 'lucide-react'
+import { Check, Minus, X } from 'lucide-react'
 import { Fragment, useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { CheckVerdict, ChecklistAnswer, CriterionCheck, Run, Severity } from '@/api/types'
+import type { CheckVerdict, ChecklistAnswer, CriterionCheck, QuestionPriority, Run, Severity } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState, Table, TBody, TD, TH, THead, TR } from '@/components/ui/misc'
-import { SeverityBadge } from '@/features/runs/RunBits'
-import { REQUIREMENT_CRITERIA, SET_CRITERIA, SEVERITIES, SEVERITY_RANK, CRITERION_REFS } from '@/shared/criteria'
+import { REQUIREMENT_CRITERIA, SET_CRITERIA, SEVERITY_RANK, CRITERION_REFS } from '@/shared/criteria'
 import { formatDate, formatDuration, formatNumber, formatUsd } from '@/shared/format'
 import { cn } from '@/shared/utils'
 import { useReport } from './context'
@@ -94,107 +93,6 @@ function Section({ title, children, className }: { title: ReactNode; children: R
       </CardHeader>
       <CardContent>{children}</CardContent>
     </Card>
-  )
-}
-
-// ---------------------------------------------------------------- Сводка и итог
-export function SummaryTab() {
-  const { t } = useTranslation()
-  const { report } = useReport()
-  const { conclusion: c, summary: s } = report
-  const byCriterion = useMemo(() => {
-    const m = new Map<string, number>()
-    report.findings.forEach((f) => m.set(f.criterion, (m.get(f.criterion) ?? 0) + 1))
-    return [...m.entries()].sort((a, b) => b[1] - a[1])
-  }, [report.findings])
-  const max = Math.max(1, ...byCriterion.map(([, n]) => n))
-
-  const Ready = ({ ok, label }: { ok: boolean; label: string }) => (
-    <div className={cn('flex items-center gap-3 rounded-lg border p-4', ok ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5')}>
-      {ok ? <CheckCircle2 className="size-7 shrink-0 text-success" /> : <XCircle className="size-7 shrink-0 text-destructive" />}
-      <div>
-        <div className="text-sm text-muted-foreground">{label}</div>
-        <div className="text-lg font-semibold">{ok ? t('report.yes') : t('report.no')}</div>
-      </div>
-    </div>
-  )
-
-  return (
-    <div className="grid gap-4 p-4 lg:grid-cols-3">
-      <div className="grid gap-4 lg:col-span-2">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Ready ok={c.ready_for_development} label={t('report.readyForDev')} />
-          <Ready ok={c.ready_for_testing} label={t('report.readyForTest')} />
-        </div>
-        <Section title={t('report.rationale')}>
-          <p className="leading-relaxed">
-            <Linkified text={c.rationale} />
-          </p>
-        </Section>
-        <Section title={t('report.topFixes')}>
-          {c.top_fixes.length ? (
-            <ol className="grid gap-2">
-              {c.top_fixes.map((fix, i) => (
-                <li key={i} className="flex gap-3">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                    {i + 1}
-                  </span>
-                  <span className="pt-0.5">
-                    <Linkified text={fix} />
-                  </span>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="text-muted-foreground">{t('report.nothingToFix')}</p>
-          )}
-        </Section>
-      </div>
-      <div className="grid content-start gap-4">
-        <Section title={t('report.numbers')}>
-          <dl className="grid grid-cols-2 gap-3">
-            <div>
-              <dt className="text-xs text-muted-foreground">{t('report.requirementsTotal')}</dt>
-              <dd className="text-2xl font-semibold tabular-nums">{s.requirements_total}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">{t('report.findingsTotal')}</dt>
-              <dd className="text-2xl font-semibold tabular-nums">{s.findings_total}</dd>
-            </div>
-          </dl>
-          <div className="mt-4 grid gap-2">
-            {SEVERITIES.map((sev) => (
-              <div key={sev} className="flex items-center justify-between">
-                <SeverityBadge severity={sev} />
-                <span className="font-semibold tabular-nums">{s.by_severity[sev] ?? 0}</span>
-              </div>
-            ))}
-          </div>
-          {s.critical_finding_ids.length > 0 && (
-            <div className="mt-4 text-sm">
-              <div className="mb-1 text-xs text-muted-foreground">{t('report.criticalIds')}</div>
-              <FindingLinks ids={s.critical_finding_ids} />
-            </div>
-          )}
-        </Section>
-        <Section title={t('report.byCriterion')}>
-          <div className="grid gap-2">
-            {byCriterion.map(([crit, n]) => (
-              <div key={crit} className="grid gap-1 text-sm">
-                <div className="flex justify-between gap-2">
-                  <span className="truncate">{t(`criteria.${crit}.title`)}</span>
-                  <span className="tabular-nums text-muted-foreground">{n}</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-primary" style={{ width: `${(n / max) * 100}%` }} />
-                </div>
-              </div>
-            ))}
-            {!byCriterion.length && <p className="text-sm text-muted-foreground">{t('report.noFindings')}</p>}
-          </div>
-        </Section>
-      </div>
-    </div>
   )
 }
 
@@ -469,6 +367,60 @@ export function PassportTab({ run }: { run: Run }) {
           ))}
         </dl>
       </Section>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- Уточняющие вопросы автору
+const PRIORITY_TONE: Record<QuestionPriority, string> = {
+  blocker: 'bg-sev-critical-bg text-sev-critical',
+  important: 'bg-sev-major-bg text-sev-major',
+  minor: 'bg-secondary text-muted-foreground',
+}
+
+export function QuestionsTab() {
+  const { t } = useTranslation()
+  const { report } = useReport()
+  const items = report.questions ?? []
+  if (!items.length) return <EmptyState title={t('questions.empty')} hint={t('questions.emptyHint')} />
+  return (
+    <div className="grid gap-3 p-4">
+      <p className="max-w-3xl text-sm text-muted-foreground">{t('questions.intro')}</p>
+      {items.map((q, i) => {
+        const prio = q.priority ?? 'important'
+        return (
+          <article key={q.id} className="rc-fade grid gap-3 rounded-2xl bg-card shadow-card p-5" style={{ animationDelay: `${Math.min(i, 10) * 0.05}s` }}>
+            <div className="flex flex-wrap items-center gap-3 font-mono text-xs">
+              <span className="text-muted-foreground">{q.id}</span>
+              <span className={cn('rounded-full px-2.5 py-0.5 font-sans font-medium', PRIORITY_TONE[prio])}>{t(`questions.priority.${prio}`)}</span>
+              <span className="text-muted-foreground">
+                {t('questions.addressee')}: <span className="text-foreground">{q.addressee}</span>
+              </span>
+            </div>
+            <h3 className="text-[1.0625rem] leading-snug font-medium">{q.question}</h3>
+            <p className="text-sm text-muted-foreground">
+              <span className="label-mono mr-2">{t('questions.why')}</span>
+              {q.why}
+            </p>
+            {(q.options?.length ?? 0) > 0 && (
+              <ul className="flex flex-wrap gap-2" aria-label={t('questions.options')}>
+                {q.options!.map((o, k) => (
+                  <li key={k} className="flex items-center gap-2 rounded-xl bg-secondary px-3.5 py-2 text-sm">
+                    <span className="font-mono text-xs text-muted-foreground">{String.fromCharCode(0x430 + k)})</span>
+                    {o}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {(q.finding_ids?.length ?? 0) > 0 && (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="label-mono">{t('questions.findings')}</span>
+                <FindingLinks ids={q.finding_ids} />
+              </div>
+            )}
+          </article>
+        )
+      })}
     </div>
   )
 }

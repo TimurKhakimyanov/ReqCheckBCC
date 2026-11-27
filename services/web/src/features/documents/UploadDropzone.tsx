@@ -1,5 +1,4 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileUp } from 'lucide-react'
 import { useRef, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -69,7 +68,7 @@ export function UploadDropzone({ onUploaded }: { onUploaded?: (doc: DocumentItem
   }
 
   return (
-    <div>
+    <div className="flex h-full flex-col">
       <div
         role="button"
         tabIndex={0}
@@ -84,15 +83,13 @@ export function UploadDropzone({ onUploaded }: { onUploaded?: (doc: DocumentItem
         onDrop={onDrop}
         data-testid="dropzone"
         className={cn(
-          'bg-grid group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-foreground/15 bg-card px-6 py-10 text-center shadow-xs transition-colors outline-none hover:border-primary/60 focus-visible:ring-[3px] focus-visible:ring-ring/30',
+          'group flex h-full min-h-[340px] cursor-pointer flex-col items-center justify-center gap-3 border border-dashed border-input bg-card/60 px-6 py-8 text-center transition-colors outline-none hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring',
           drag && 'border-primary bg-primary-tint',
         )}
       >
-        <span className="mb-1 flex size-11 items-center justify-center rounded-xl bg-card text-muted-foreground shadow-card transition-colors group-hover:text-primary">
-          <FileUp className="size-5" />
-        </span>
-        <p className="font-medium">{t('upload.title')}</p>
-        <p className="text-sm text-muted-foreground">{t('upload.hint', { mb: maxMb })}</p>
+        <DropIllustration />
+        <p className="text-lg font-medium tracking-tight">{t('upload.title')}</p>
+        <p className="font-mono text-xs text-muted-foreground">{t('upload.hint', { mb: maxMb })}</p>
         <input
           ref={input}
           type="file"
@@ -109,7 +106,7 @@ export function UploadDropzone({ onUploaded }: { onUploaded?: (doc: DocumentItem
       {items.length > 0 && (
         <ul className="mt-3 grid gap-2">
           {items.map((x) => (
-            <li key={x.name} className="rounded-md border bg-card px-3 py-2 text-sm">
+            <li key={x.name} className="rounded-2xl bg-card shadow-card px-3 py-2 text-sm">
               <div className="mb-1.5 flex justify-between gap-2">
                 <span className="truncate">{x.name}</span>
                 <span className="text-muted-foreground tabular-nums">
@@ -122,5 +119,29 @@ export function UploadDropzone({ onUploaded }: { onUploaded?: (doc: DocumentItem
         </ul>
       )}
     </div>
+  )
+}
+
+/** Изометрическая стопка документов: на неё падает куб-файл. Только декор. */
+function DropIllustration() {
+  return (
+    <svg viewBox="0 0 240 200" className="h-auto w-56 overflow-visible" aria-hidden>
+      <polygon points="10,135 120,190 120,198 10,143" style={{ fill: 'var(--scene-face-r)', stroke: 'var(--scene-edge)' }} />
+      <polygon points="120,190 230,135 230,143 120,198" style={{ fill: 'var(--scene-face-r)', stroke: 'var(--scene-edge)' }} />
+      <polygon points="120,80 230,135 120,190 10,135" style={{ fill: 'var(--scene-pad)', stroke: 'var(--scene-edge)' }} />
+      <polygon points="10,110 120,165 120,171 10,116" style={{ fill: 'var(--scene-face-l)', stroke: 'var(--teal)' }} />
+      <polygon points="120,165 230,110 230,116 120,171" style={{ fill: 'var(--scene-face-l)', stroke: 'var(--teal)' }} />
+      <polygon points="120,55 230,110 120,165 10,110" style={{ fill: 'var(--scene-pad)', stroke: 'var(--teal)' }} />
+      <line x1="156.7" y1="73.3" x2="46.7" y2="128.3" style={{ stroke: 'var(--grid-line)' }} />
+      <line x1="83.3" y1="73.3" x2="193.3" y2="128.3" style={{ stroke: 'var(--grid-line)' }} />
+      <g className="rc-pulse">
+        <polygon points="120,95 160,115 120,135 80,115" fill="none" style={{ stroke: 'var(--primary)' }} />
+      </g>
+      <g className="rc-drop-cube">
+        <polygon points="95,62 120,74.5 120,112 95,99.5" style={{ fill: 'var(--scene-face-l)', stroke: 'var(--primary)' }} />
+        <polygon points="120,74.5 145,62 145,99.5 120,112" style={{ fill: 'var(--scene-face-r)', stroke: 'var(--primary)' }} />
+        <polygon points="120,49.5 145,62 120,74.5 95,62" stroke="#F49A5A" style={{ fill: 'var(--primary)' }} />
+      </g>
+    </svg>
   )
 }

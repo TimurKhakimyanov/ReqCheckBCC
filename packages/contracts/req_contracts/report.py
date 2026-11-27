@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from .criteria import Criterion
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"  # 1.1: уточняющие вопросы автору (Report.questions)
 
 
 class Severity(str, Enum):
@@ -134,6 +134,24 @@ class ChecklistItem(BaseModel):
     finding_ids: list[str] = Field(default_factory=list)
 
 
+class QuestionPriority(str, Enum):
+    BLOCKER = "blocker"  # без ответа нельзя начинать разработку или тестирование этой части
+    IMPORTANT = "important"  # ответить до завершения разработки
+    MINOR = "minor"  # желательно
+
+
+class ClarifyingQuestion(BaseModel):
+    """Уточняющий вопрос автору документа: закрытый, с вариантами ответа и ссылками на дефекты."""
+
+    id: str = Field(description="Q-01, Q-02…")
+    question: str
+    why: str = Field(description="Что заблокировано без ответа")
+    addressee: str = Field(default="Аналитик", description="Кто отвечает: Business owner, Product owner, Аналитик…")
+    priority: QuestionPriority = QuestionPriority.IMPORTANT
+    finding_ids: list[str] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list, description="2–4 варианта ответа, между которыми выбирает автор")
+
+
 class RunPassport(BaseModel):
     document_name: str
     document_sha256: str
@@ -177,6 +195,7 @@ class Report(BaseModel):
     set_assessment: SetAssessment
     findings: list[Finding]
     checklist: list[ChecklistItem] = Field(default_factory=list)
+    questions: list[ClarifyingQuestion] = Field(default_factory=list)
     summary: Summary
     conclusion: Conclusion
     usage: Usage = Field(default_factory=Usage)

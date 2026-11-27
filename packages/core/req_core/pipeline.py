@@ -1,5 +1,7 @@
-"""Конвейер проверки: нарезка → правила → проверка требований → проверка набора → критик →
-проверка цитат кодом → чек-лист → сводка и итог."""
+"""Конвейер проверки: нарезка → правила → проверка требований → рецензенты набора (6 ролей) →
+проверка цитат кодом → верификатор (опровержение + слияние дублей) → чек-лист → уточняющие вопросы → итог.
+
+Рецензенты по ролям, верификатор и уточняющие вопросы перенесены из bbc-agent (validator/agents)."""
 
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ from req_contracts import (
     CheckVerdict,
     ChecklistAnswer,
     ChecklistItem,
+    ClarifyingQuestion,
     Conclusion,
     Criterion,
     CriterionCheck,
@@ -27,6 +30,7 @@ from req_contracts import (
     ParsedDocument,
     ProgressCallback,
     ProgressEvent,
+    QuestionPriority,
     Report,
     Requirement,
     RequirementAssessment,
@@ -53,12 +57,15 @@ from .rules import (
 from .schemas import (
     ChecklistResult,
     ConclusionResult,
-    CriticResult,
+    DedupResult,
     Issue,
+    QuestionsResult,
     RequirementBatchResult,
+    RoleReviewResult,
     SegmentationResult,
-    SetConsistencyResult,
-    SetReviewResult,
+    SetCheck,
+    VerifierDecision,
+    VerifierResult,
 )
 from .text import QuoteLocator, SectionIndex, clean_inline, page_for, shorten
 
@@ -72,7 +79,9 @@ class Settings:
 
     context_chars = 150_000  # текст документа в промпте
     segment_chunk_chars = 40_000  # фрагмент документа для нарезки
-    critic_batch = 30
+    verify_batch = 20  # замечаний в одном запросе верификатора
+    verify_retry_batch = 8  # замечания без ответа верификатора — повторно, маленькими пачками
+    dedup_rows = 140  # замечаний в одном запросе на слияние дублей
 
     def __init__(self, options: ValidationOptions) -> None:
         self.batch_size = max(1, options.batch_size)
@@ -133,6 +142,9 @@ def strip_foreign_script(report: Report) -> Report:
         c.comment = _clean(c.comment)
     for item in report.checklist:
         item.comment = _clean(item.comment)
+    for q in report.questions:
+        q.question, q.why = _clean(q.question), _clean(q.why)
+        q.options = [_clean(o) for o in q.options]
     report.conclusion.rationale = _clean(report.conclusion.rationale)
     report.conclusion.top_fixes = [_clean(x) for x in report.conclusion.top_fixes]
     return report
@@ -176,6 +188,7 @@ class Pipeline:
         self.system = prompts.system_prompt(options.knowledge_snippets)
         self.warnings: list[str] = []
         self.dropped_unverified = 0
+        self.verify_stats = {"candidates": 0, "dropped": 0, "merged": 0, "unverified": 0}
         self.llm_ok = 0
         try:  # клиент LLM сообщает о паузах перед повтором (429) — пробрасываем как heartbeat прогресса
             client.on_wait = progress.heartbeat
@@ -199,6 +212,17 @@ class Pipeline:
             # адреса серверов в отчёт не попадают
             self.warnings.append(f"{what}: {shorten(re.sub(r'https?://\S+', '<url>', str(e)), 160)}")
             return None
+
+    def parallel(self, fn: Any, items: list[Any]) -> list[Any]:
+        """Запуск fn по элементам с self.s.concurrency потоками; порядок результатов сохраняется.
+        При отмене (исключение из on_progress) не ждём оставшиеся задания."""
+        if self.s.concurrency > 1 and len(items) > 1:
+            ex = ThreadPoolExecutor(min(self.s.concurrency, len(items)))
+            try:
+                return list(ex.map(fn, items))
+            finally:
+                ex.shutdown(wait=self.progress.aborted is None, cancel_futures=True)
+        return [fn(x) for x in items]
 
     # ------------------------------------------------------------ нарезка
 
@@ -315,7 +339,8 @@ class Pipeline:
 
     # ------------------------------------------------------------ проверки LLM
 
-    def issues_to_drafts(self, issues: list[Issue], known_ids: set[str], default_scope: FindingScope) -> list[FindingDraft]:
+    def issues_to_drafts(self, issues: list[Issue], known_ids: set[str], default_scope: FindingScope,
+                         origin: str = "") -> list[FindingDraft]:
         out = []
         for it in issues:
             rids = [r for r in dict.fromkeys(x.strip() for x in it.requirement_ids) if r in known_ids]
@@ -330,6 +355,7 @@ class Pipeline:
                 title=title, explanation=explanation,
                 requirement_ids=rids, suggestion=it.suggestion.strip() or None, source=FindingSource.LLM,
                 unverified_quotes=[q for q in it.quotes if q and q.strip()],
+                question=it.question.strip(), addressee=it.addressee.strip(), origin=origin,
             ))
         return out
 
@@ -377,7 +403,7 @@ class Pipeline:
         for res in results:
             if not res:
                 continue
-            issues += self.issues_to_drafts(res.issues, ids, FindingScope.REQUIREMENT)
+            issues += self.issues_to_drafts(res.issues, ids, FindingScope.REQUIREMENT, "inspector")
             for item in res.not_applicable:
                 if item.requirement_id in ids:
                     na.setdefault(item.requirement_id, set()).update(
@@ -392,26 +418,51 @@ class Pipeline:
 
     def check_set(self, drafts: list[ReqDraft], known: list[FindingDraft], ids: set[str]
                   ) -> tuple[list[FindingDraft], dict[Criterion, Any]]:
+        """Набор смотрят рецензенты с разными ролями (prompts.REVIEW_ROLES): два контролёра непротиворечивости,
+        аналитик, тест-аналитик, архитектор, ИБ. Совпадающие замечания потом сливает верификатор."""
         doc = prompts.doc_block(self.text, self.s.context_chars)
         reqs = self.reqs_list(drafts)
+        known_set = self.known_block([f for f in known if f.scope == FindingScope.SET])
+        roles = prompts.REVIEW_ROLES
+        total = len(roles)
+        done = 0
+        lock = threading.Lock()
+
+        def run(role: dict) -> RoleReviewResult | None:
+            nonlocal done
+            user = prompts.ROLE_REVIEW_TASK.format(
+                persona=role["persona"], focus=role["focus"], criteria=prompts.criteria_block(role["criteria"]),
+                known=known_set, reqs=reqs, doc=doc,
+            )
+            res = self.ask(user, RoleReviewResult, f"рецензент «{role['title']}»")
+            with lock:
+                done += 1
+                n = done
+            self.progress(RunStage.CHECKING_SET, 0.72 + 0.12 * n / total, f"Рецензент: {role['title']}", n, total)
+            return res
+
         with self._set_review_body():
-            self.progress(RunStage.CHECKING_SET, 0.72, "Проверка согласованности набора")
-            cons = self.ask(prompts.SET_CONSISTENCY_TASK.format(
-                known=self.known_block([f for f in known if f.scope == FindingScope.SET]), reqs=reqs, doc=doc),
-                SetConsistencyResult, "проверка согласованности набора")
-            self.progress(RunStage.CHECKING_SET, 0.8, "Проверка полноты набора")
-            rev = self.ask(prompts.SET_REVIEW_TASK.format(
-                criteria=prompts.set_criteria_block(), known=self.known_block(known), reqs=reqs, doc=doc),
-                SetReviewResult, "проверка полноты набора")
+            self.progress(RunStage.CHECKING_SET, 0.72, "Рецензенты набора", 0, total)
+            results = self.parallel(run, roles)
+
         out: list[FindingDraft] = []
-        checks: dict[Criterion, Any] = {}
-        if cons:
-            out += self.issues_to_drafts(cons.issues, ids, FindingScope.SET)
-        if rev:
-            out += self.issues_to_drafts(rev.issues, ids, FindingScope.SET)
-            for c in rev.checks:
-                if c.criterion in SET_CRITERIA:
-                    checks[c.criterion] = c
+        checks: dict[Criterion, SetCheck] = {}
+        for role, res in zip(roles, results):
+            if not res:
+                continue
+            own = list(role["criteria"])
+            for it in res.issues:
+                if it.criterion not in SET_CRITERIA:  # рецензент отвечает за критерии набора
+                    it.criterion = own[0]
+            out += self.issues_to_drafts(res.issues, ids, FindingScope.SET, f"reviewer:{role['key']}")
+            for c in res.checks:
+                if c.criterion not in own:
+                    continue
+                prev = checks.get(c.criterion)
+                comment = f"{role['title']}: {c.comment.strip()}" if c.comment.strip() else ""
+                # нарушение хотя бы у одного рецензента важнее «выполнено» у другого
+                if prev is None or (c.verdict == CheckVerdict.FAIL and prev.verdict != CheckVerdict.FAIL):
+                    checks[c.criterion] = SetCheck(criterion=c.criterion, verdict=c.verdict, comment=comment)
         return out, checks
 
     # ------------------------------------------------------------ цитаты
@@ -469,35 +520,209 @@ class Pipeline:
                 dup.requirement_ids = list(dict.fromkeys(dup.requirement_ids + f.requirement_ids))
         return out
 
-    # ------------------------------------------------------------ критик
+    # ------------------------------------------------------------ верификатор
 
-    def critic(self, findings: list[FindingDraft]) -> list[FindingDraft]:
-        self.progress(RunStage.VERIFYING, 0.88, "Перепроверка дефектов (критик)")
+    def _verifier_block(self, f: FindingDraft) -> str:
+        level = "набор" if f.scope == FindingScope.SET else "требование"
+        src = "правило (без LLM)" if f.source == FindingSource.RULE else (f.origin or "модель")
+        quotes = " / ".join(f"«{shorten(self.text[s:e], 250)}»" for s, e in f.spans)
+        flag = ""
+        if f.unverified_quotes:
+            flag = "\n⚠ цитата модели не найдена дословно: «" + shorten(f.unverified_quotes[0], 200) + "»"
+        return (f"{f.id} | уровень: {level} | {f.criterion.value} | {f.severity.value} | "
+                f"{', '.join(f.requirement_ids) or 'документ в целом'} | источник: {src}\n"
+                f"{f.title}\n{f.explanation}\nЦитаты: {quotes}{flag}")
+
+    def verify(self, findings: list[FindingDraft]) -> list[FindingDraft]:
+        """Верификатор пытается опровергнуть каждое замечание по тексту и выравнивает критичность.
+        Замечания правил не отклоняются (только критичность). Без ответа модели замечание остаётся."""
         for i, f in enumerate(findings, 1):
-            f.id = f"tmp-{i}"
-        by_id = {f.id: f for f in findings}
+            f.id = f"C-{i:03d}"
+        total = len(findings)
+        self.progress(RunStage.VERIFYING, 0.86, "Верификатор: перепроверка дефектов", 0, total)
         doc = prompts.doc_block(self.text, self.s.context_chars)
-        drop: set[str] = set()
-        for i in range(0, len(findings), self.s.critic_batch):
-            batch = findings[i:i + self.s.critic_batch]
-            block = "\n\n".join(
-                f"{f.id} [{f.criterion.value}, {f.severity.value}, {', '.join(f.requirement_ids) or 'набор'}] {f.title}\n"
-                f"{f.explanation}\nЦитаты: " + " / ".join(f"«{shorten(self.text[s:e], 250)}»" for s, e in f.spans)
-                for f in batch
-            )
-            res = self.ask(prompts.CRITIC_TASK.format(findings=block, doc=doc), CriticResult, "критик")
-            if not res:
+        checked = 0
+        lock = threading.Lock()
+
+        def run(batch: list[FindingDraft]) -> dict[str, VerifierDecision]:
+            nonlocal checked
+            res = self.ask(prompts.VERIFIER_TASK.format(
+                findings="\n\n".join(self._verifier_block(f) for f in batch), doc=doc), VerifierResult, "верификатор")
+            with lock:
+                checked += len(batch)
+                n = min(checked, total)
+            self.progress(RunStage.VERIFYING, 0.86 + 0.02 * n / total, "Верификатор: перепроверка дефектов", n, total)
+            return {d.finding_id.strip(): d for d in res.decisions} if res else {}
+
+        b = self.s.verify_batch
+        decisions: dict[str, VerifierDecision] = {}
+        for part in self.parallel(run, [findings[i:i + b] for i in range(0, total, b)]):
+            decisions.update(part)
+        if decisions:  # модель отвечает, но часть замечаний пропустила — ещё раз маленькими пачками
+            missing = [f for f in findings if f.id not in decisions]
+            rb = self.s.verify_retry_batch
+            for part in self.parallel(run, [missing[i:i + rb] for i in range(0, len(missing), rb)]):
+                decisions.update(part)
+
+        kept: list[FindingDraft] = []
+        for f in findings:
+            d = decisions.get(f.id)
+            if d is None:
+                self.verify_stats["unverified"] += 1
+                kept.append(f)
                 continue
-            for v in res.verdicts:
-                f = by_id.get(v.finding_id.strip())
-                if not f:
+            sev = d.severity.strip().lower()
+            if sev in {x.value for x in Severity}:
+                f.severity = Severity(sev)
+            if d.verdict.strip().lower() == "drop" and f.source == FindingSource.LLM:
+                self.verify_stats["dropped"] += 1
+                log.info("Верификатор отклонил %s «%s»: %s", f.id, f.title, d.reason)
+                continue
+            kept.append(f)
+        self.verify_stats["candidates"] = total
+        return kept
+
+    @staticmethod
+    def _same_place(a: FindingDraft, b: FindingDraft) -> bool:
+        return any(overlap(x, y) > 0 for x in a.spans for y in b.spans)
+
+    @classmethod
+    def _related(cls, a: FindingDraft, b: FindingDraft) -> bool:
+        """Страховка от ложных слияний: дубли обязаны быть об одном месте, требовании или критерии набора."""
+        if cls._same_place(a, b) or set(a.requirement_ids) & set(b.requirement_ids):
+            return True
+        return a.scope == b.scope == FindingScope.SET and a.criterion == b.criterion
+
+    @staticmethod
+    def _keeper_rank(f: FindingDraft) -> tuple:
+        """Какое замечание группы остаётся: противоречие > уровень набора > критичность > доказательства > LLM."""
+        return (
+            0 if f.criterion == Criterion.SET_CONSISTENT else 1,
+            0 if f.scope == FindingScope.SET else 1,
+            SEVERITY_RANK[f.severity],
+            -len(f.spans),
+            0 if f.source == FindingSource.LLM else 1,
+            f.id,
+        )
+
+    @staticmethod
+    def _merge_into(keep: FindingDraft, dup: FindingDraft) -> None:
+        keep.requirement_ids = list(dict.fromkeys(keep.requirement_ids + dup.requirement_ids))
+        for sp in dup.spans:
+            if len(keep.spans) < 4 and not any(overlap(sp, k) > 0 for k in keep.spans):
+                keep.spans.append(sp)
+        if SEVERITY_RANK[dup.severity] < SEVERITY_RANK[keep.severity]:
+            keep.severity = dup.severity
+        keep.suggestion = keep.suggestion or dup.suggestion
+        if not keep.question and dup.question:
+            keep.question, keep.addressee = dup.question, dup.addressee
+
+    def _dedup_row(self, f: FindingDraft) -> str:
+        level = "набор" if f.scope == FindingScope.SET else "требование"
+        return (f"{f.id} | {level} | {f.criterion.value} | {f.severity.value} | "
+                f"{', '.join(f.requirement_ids) or 'документ в целом'} | {f.title}. {shorten(f.explanation, 300)}")
+
+    def llm_dedup(self, findings: list[FindingDraft]) -> list[FindingDraft]:
+        """Слияние дублей в два прохода: по всему списку и по группам замечаний об одном месте документа.
+        Модель предлагает группы, код решает, что объединять и какое замечание оставить."""
+        if len(findings) < 2:
+            return findings
+        self.progress(RunStage.VERIFYING, 0.89, "Верификатор: слияние дублей")
+        by_id = {f.id: f for f in findings}
+        alive = set(by_id)
+
+        def apply(res: DedupResult | None) -> None:
+            for g in res.groups if res else []:
+                group = [by_id[i] for i in dict.fromkeys(x.strip() for x in g.ids) if i in alive]
+                if len(group) < 2:
                     continue
-                if not v.keep and f.source == FindingSource.LLM:
-                    drop.add(f.id)
-                sev = v.severity.strip().lower()
-                if sev in {s.value for s in Severity}:
-                    f.severity = Severity(sev)
-        return [f for f in findings if f.id not in drop]
+                group.sort(key=self._keeper_rank)
+                keep = group[0]
+                for dup in group[1:]:
+                    if self._related(dup, keep):
+                        self._merge_into(keep, dup)
+                        alive.discard(dup.id)
+                        self.verify_stats["merged"] += 1
+
+        ordered = sorted(findings, key=lambda f: (min((s for s, _ in f.spans), default=0), f.id))
+        n = self.s.dedup_rows
+        for i in range(0, len(ordered), n):
+            chunk = ordered[i:i + n]
+            if len(chunk) >= 2:
+                apply(self.ask(prompts.DEDUP_TASK.format(findings="\n".join(self._dedup_row(f) for f in chunk)),
+                               DedupResult, "слияние дублей"))
+
+        # проход 2: замечания об одном месте — в коротком списке модель видит такие пары сразу
+        clusters: list[list[FindingDraft]] = []
+        for f in [x for x in ordered if x.id in alive]:
+            home = next((c for c in clusters if any(self._same_place(f, m) for m in c)), None)
+            if home is None:
+                clusters.append([f])
+            else:
+                home.append(f)
+        blocks = []
+        for c in clusters:
+            if len(c) < 2:
+                continue
+            where = sorted({self.sections.path(s) for f in c for s, _ in f.spans[:1]})
+            blocks.append(f"--- одно место документа ({'; '.join(where[:2])}) ---\n"
+                          + "\n".join(self._dedup_row(f) for f in c))
+        if blocks:
+            apply(self.ask(prompts.DEDUP_TASK.format(findings="\n".join(blocks)), DedupResult,
+                           "слияние дублей: одно место документа"))
+        return [f for f in findings if f.id in alive]
+
+    # ------------------------------------------------------------ уточняющие вопросы
+
+    def clarifying_questions(self, findings: list[FindingDraft]) -> list[ClarifyingQuestion]:
+        """Закрытые вопросы автору с вариантами ответа. Без ответа модели — вопросы, предложенные рецензентами."""
+        limit = self.options.max_questions
+        if not self.options.ask_questions or limit <= 0 or not findings:
+            return []
+        self.progress(RunStage.VERIFYING, 0.93, "Уточняющие вопросы автору")
+        ordered = sorted(findings, key=lambda f: SEVERITY_RANK[f.severity])
+        rows = "\n".join(
+            f"{f.id} | {f.severity.value} | {', '.join(f.requirement_ids) or 'набор'} | {f.title}. "
+            f"{shorten(f.explanation, 220)} | {f.question or '—'}"
+            for f in ordered[:120]
+        )
+        res = self.ask(prompts.QUESTIONS_TASK.format(
+            limit=limit, findings=rows, doc=prompts.doc_block(self.text, self.s.context_chars)),
+            QuestionsResult, "уточняющие вопросы")
+        valid = {f.id for f in findings}
+        prio = {p.value: p for p in QuestionPriority}
+        items: list[ClarifyingQuestion] = []
+        seen: set[str] = set()
+        if res and res.questions:
+            for q in res.questions:
+                text = " ".join(q.question.split())
+                if not text or text.lower() in seen:
+                    continue
+                seen.add(text.lower())
+                items.append(ClarifyingQuestion(
+                    id="", question=text, why=" ".join(q.why.split()) or "Без ответа требование трактуется по-разному.",
+                    addressee=q.addressee.strip() or "Аналитик",
+                    priority=prio.get(q.priority.strip().lower(), QuestionPriority.IMPORTANT),
+                    finding_ids=[x for x in dict.fromkeys(i.strip() for i in q.finding_ids) if x in valid],
+                    options=[" ".join(o.split()) for o in q.options if o.strip()][:4],
+                ))
+        else:
+            for f in ordered:
+                text = " ".join(f.question.split())
+                if not text or text.lower() in seen:
+                    continue
+                seen.add(text.lower())
+                items.append(ClarifyingQuestion(
+                    id="", question=text, why=f"Без ответа не закрыть {f.id}: {f.title}",
+                    addressee=f.addressee or "Аналитик",
+                    priority=QuestionPriority.BLOCKER if f.severity == Severity.CRITICAL else QuestionPriority.IMPORTANT,
+                    finding_ids=[f.id],
+                ))
+        rank = {QuestionPriority.BLOCKER: 0, QuestionPriority.IMPORTANT: 1, QuestionPriority.MINOR: 2}
+        items = sorted(items, key=lambda q: rank[q.priority])[:limit]
+        for i, q in enumerate(items, 1):
+            q.id = f"Q-{i:02d}"
+        return items
 
     # ------------------------------------------------------------ сборка отчёта
 
@@ -528,10 +753,16 @@ class Pipeline:
         req_issues, na = self.check_requirements(drafts, rules, ids) if drafts else ([], {})
         set_issues, set_checks = self.check_set(drafts, rules + req_issues, ids)
 
+        for f in rules:
+            f.origin = f.origin or "rules"
         findings = self.resolve_quotes(req_issues + set_issues + rules, req_by_id)
         findings = self.dedupe(findings)
         if self.options.verify_pass and findings:
-            findings = self.critic(findings)
+            findings = self.verify(findings)
+            findings = self.llm_dedup(findings)
+            v = self.verify_stats
+            log.info("Верификатор: кандидатов %s, отклонено %s, слито дублей %s, без ответа %s",
+                     v["candidates"], v["dropped"], v["merged"], v["unverified"])
 
         order = {d.id: i for i, d in enumerate(flat)}
         findings.sort(key=lambda f: (
@@ -552,6 +783,7 @@ class Pipeline:
         assessments = [self._assess(d.id, findings, na.get(d.id, set())) for d in flat]
         set_assessment = self._set_assess(findings, set_checks)
         checklist = self._checklist(report_findings, drafts) if self.options.fill_checklist else []
+        questions = self.clarifying_questions(findings)
 
         by_sev = {s: sum(1 for f in findings if f.severity == s) for s in Severity}
         summary = Summary(
@@ -570,7 +802,7 @@ class Pipeline:
                 provider=self.provider, model=self.model, agent_version=_agent_version(),
             ),
             document=self.doc, requirements=requirements, requirement_assessments=assessments,
-            set_assessment=set_assessment, findings=report_findings, checklist=checklist,
+            set_assessment=set_assessment, findings=report_findings, checklist=checklist, questions=questions,
             summary=summary, conclusion=conclusion, usage=usage,
         )
         if not FOREIGN_SCRIPT.search(self.doc.text):

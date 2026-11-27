@@ -13,9 +13,9 @@ import { FindingCard } from './FindingCard'
 import { isFiltered, type FindingFilters, EMPTY_FILTERS } from './filters'
 
 const SEV_ON = {
-  critical: 'bg-sev-critical-bg border-sev-critical text-sev-critical',
-  major: 'bg-sev-major-bg border-sev-major text-sev-major',
-  minor: 'bg-sev-minor-bg border-sev-minor text-sev-minor',
+  critical: 'bg-sev-critical-bg text-sev-critical',
+  major: 'bg-sev-major-bg text-sev-major',
+  minor: 'bg-sev-minor-bg text-sev-minor',
 }
 export const SEV_DOT = { critical: 'bg-sev-critical', major: 'bg-sev-major', minor: 'bg-sev-minor' }
 
@@ -53,7 +53,7 @@ export function FindingsPanel({ visible, filters, setFilters }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="grid gap-2 border-b p-3">
+      <div className="grid gap-2.5 border-b p-3">
         <div className="flex flex-wrap items-center gap-1.5">
           {SEVERITIES.map((s) => (
             <button
@@ -62,8 +62,8 @@ export function FindingsPanel({ visible, filters, setFilters }: Props) {
               aria-pressed={filters.severities.includes(s)}
               onClick={() => toggleSev(s)}
               className={cn(
-                'press inline-flex cursor-pointer items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs font-[450] shadow-xs',
-                filters.severities.includes(s) ? SEV_ON[s] : 'hover:bg-muted',
+                'press inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors',
+                filters.severities.includes(s) ? SEV_ON[s] : 'bg-secondary text-muted-foreground hover:bg-accent',
               )}
             >
               <span className={cn('size-2 rounded-full', SEV_DOT[s])} />
@@ -81,7 +81,7 @@ export function FindingsPanel({ visible, filters, setFilters }: Props) {
         <div className="grid grid-cols-2 gap-2">
           <NativeSelect
             aria-label={t('report.criterion')}
-            className="h-8 text-xs"
+            className="h-9 rounded-full border-0 bg-secondary px-3 text-xs shadow-none"
             value={filters.criterion}
             onChange={(e) => setFilters({ ...filters, criterion: e.target.value as Criterion | '' })}
           >
@@ -94,7 +94,7 @@ export function FindingsPanel({ visible, filters, setFilters }: Props) {
           </NativeSelect>
           <NativeSelect
             aria-label={t('report.status')}
-            className="h-8 text-xs"
+            className="h-9 rounded-full border-0 bg-secondary px-3 text-xs shadow-none"
             value={filters.status}
             onChange={(e) => setFilters({ ...filters, status: e.target.value as ReviewStatus | '' })}
           >
@@ -108,9 +108,9 @@ export function FindingsPanel({ visible, filters, setFilters }: Props) {
         </div>
         <div className="flex gap-2">
           <div className="relative flex-1">
-            <Search className="absolute top-2 left-2.5 size-4 text-muted-foreground" />
+            <Search className="absolute top-2.5 left-3 size-4 text-muted-foreground" />
             <Input
-              className="h-8 pl-8 text-xs"
+              className="h-9 rounded-full border-0 bg-secondary pl-9 text-xs shadow-none"
               placeholder={t('report.searchFindings')}
               value={filters.q}
               onChange={(e) => setFilters({ ...filters, q: e.target.value })}
@@ -126,7 +126,7 @@ export function FindingsPanel({ visible, filters, setFilters }: Props) {
           {t('report.shown', { shown: visible.length, total: report.findings.length })}
         </div>
       </div>
-      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="findings-list">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto bg-background/60 p-3" data-testid="findings-list">
         {visible.length === 0 ? (
           <EmptyState title={report.findings.length ? t('report.noMatches') : t('report.noFindings')} />
         ) : (

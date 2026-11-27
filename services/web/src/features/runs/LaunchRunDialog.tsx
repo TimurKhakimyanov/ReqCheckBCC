@@ -200,6 +200,7 @@ export function LaunchRunDialog({
               {opt('verify_pass')}
               {opt('split_compound')}
               {opt('fill_checklist')}
+              {opt('ask_questions')}
             </div>
             {create.error && <ErrorNote error={create.error} />}
           </form>

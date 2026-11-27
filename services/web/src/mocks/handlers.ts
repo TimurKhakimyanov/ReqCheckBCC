@@ -16,6 +16,7 @@ import {
   setSession,
   uid,
 } from './data'
+import { detail as wikiDetail, graph as wikiGraph } from './wiki'
 
 const A = (p: string) => `*/api${p}`
 
@@ -591,6 +592,8 @@ export const handlers = [
       let title: string
       let size: number
       let source: 'upload' | 'manual'
+      let content = ''
+      let folder = ''
       if (ct.includes('multipart/form-data')) {
         const form = await request.formData()
         const file = form.get('file')
@@ -598,11 +601,13 @@ export const handlers = [
         const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
         if (!['pdf', 'docx', 'md', 'txt'].includes(ext)) return err(415, 'Формат не поддерживается', 'unsupported_format')
         if (file.size === 0) return err(400, 'Файл пустой', 'empty_file')
-        title = String(form.get('title') || file.name)
+        title = String(form.get('title') || file.name.replace(/\.[^.]+$/, ''))
         size = file.size
         source = 'upload'
+        folder = String(form.get('folder') || '')
+        content = ['md', 'txt'].includes(ext) ? await file.text() : `# ${title}\n\nТекст извлечён из ${ext.toUpperCase()}.`
       } else {
-        const body = (await request.json()) as { title: string; text: string }
+        const body = (await request.json()) as { title: string; text: string; folder?: string }
         if (!body.title || !body.text)
           return HttpResponse.json(
             {
@@ -615,6 +620,8 @@ export const handlers = [
         title = body.title
         size = body.text.length
         source = 'manual'
+        content = body.text
+        folder = body.folder ?? ''
       }
       const item = {
         id: uid('kb'),
@@ -623,11 +630,47 @@ export const handlers = [
         chunks: Math.max(1, Math.round(size / 800)),
         status: 'indexing' as const,
         created_at: new Date().toISOString(),
+        updated_at: null,
+        folder: folder.split('/').map((p) => p.trim()).filter(Boolean).join('/'),
+        chars: content.length,
         _readyAt: Date.now() + 3000,
+        _content: content,
       }
       db.knowledge.unshift(item)
       logAudit('knowledge.add', item.id, { title })
       return HttpResponse.json(strip(item), { status: 201 })
+    }),
+  ),
+  http.get(
+    A('/knowledge/graph'),
+    guard(() => HttpResponse.json(wikiGraph(db.knowledge))),
+  ),
+  http.get(
+    A('/knowledge/:id'),
+    guard(({ params }: { params: Record<string, string> }) => {
+      const d = wikiDetail(db.knowledge, String(params.id))
+      return d ? HttpResponse.json(d) : err(404, 'Не найдено', 'not_found')
+    }),
+  ),
+  http.patch(
+    A('/knowledge/:id'),
+    guard(async ({ params, request }: { params: Record<string, string>; request: Request }) => {
+      const item = db.knowledge.find((k) => k.id === params.id)
+      if (!item) return err(404, 'Не найдено', 'not_found')
+      const body = (await request.json()) as { title?: string; text?: string; folder?: string }
+      if (item.source === 'builtin' && (body.title !== undefined || body.text !== undefined))
+        return err(409, 'Встроенный материал можно только перенести в другую папку', 'builtin_protected')
+      if (body.title !== undefined) item.title = body.title
+      if (body.folder !== undefined) item.folder = body.folder.split('/').map((p) => p.trim()).filter(Boolean).join('/')
+      if (body.text !== undefined) {
+        item._content = body.text
+        item.chars = body.text.length
+        item.status = 'indexing'
+        item._readyAt = Date.now() + 1500
+      }
+      item.updated_at = new Date().toISOString()
+      logAudit('knowledge.update', item.id, { title: item.title })
+      return HttpResponse.json(strip(item))
     }),
   ),
   http.delete(

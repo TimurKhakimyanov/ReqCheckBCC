@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { Finding, FindingReview, Report } from '@/api/types'
 
-export type ReportTab = 'findings' | 'summary' | 'requirements' | 'matrix' | 'set' | 'checklist' | 'passport'
+export type ReportTab = 'findings' | 'summary' | 'questions' | 'requirements' | 'matrix' | 'set' | 'checklist' | 'passport'
 
 export interface Selection {
   findingId: string | null

@@ -71,8 +71,8 @@ export const FindingCard = forwardRef<HTMLDivElement, Props>(function FindingCar
       data-active={active}
       onClick={() => !active && onSelect()}
       className={cn(
-        'rounded-xl bg-card p-3.5 text-sm shadow-card transition-shadow',
-        active ? 'shadow-raised ring-[1.5px] ring-primary' : 'cursor-pointer hover:shadow-raised',
+        'rounded-2xl bg-card p-4 text-sm shadow-card transition-[box-shadow,transform] duration-200',
+        active ? 'shadow-raised ring-2 ring-ring' : 'cursor-pointer hover:-translate-y-px hover:shadow-raised',
         status !== 'open' && !active && 'opacity-70',
       )}
     >
@@ -128,7 +128,7 @@ export const FindingCard = forwardRef<HTMLDivElement, Props>(function FindingCar
                 key={i}
                 type="button"
                 onClick={() => onSelect(i)}
-                className="group rounded-lg border-l-2 border-primary/70 bg-muted px-2.5 py-1.5 text-left hover:bg-accent"
+                className="group rounded-xl bg-secondary px-3 py-2 text-left hover:bg-accent"
               >
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <MapPin className="size-3" />
@@ -145,7 +145,7 @@ export const FindingCard = forwardRef<HTMLDivElement, Props>(function FindingCar
             ))}
           </div>
           {f.suggestion && (
-            <div className="rounded-md border border-success/40 bg-success/5 p-2.5">
+            <div className="rounded-xl bg-success/10 p-3">
               <div className="mb-1 flex items-center justify-between text-xs font-medium text-success">
                 {t('report.suggestion')}
                 <Button

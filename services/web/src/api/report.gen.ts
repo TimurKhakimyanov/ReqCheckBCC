@@ -109,6 +109,26 @@ export type ChecklistAnswer = "yes" | "no" | "not_required";
 export type Comment1 = string;
 export type FindingIds1 = string[];
 export type Checklist = ChecklistItem[];
+/**
+ * Q-01, Q-02…
+ */
+export type Id2 = string;
+export type Question1 = string;
+/**
+ * Что заблокировано без ответа
+ */
+export type Why = string;
+/**
+ * Кто отвечает: Business owner, Product owner, Аналитик…
+ */
+export type Addressee = string;
+export type QuestionPriority = "blocker" | "important" | "minor";
+export type FindingIds2 = string[];
+/**
+ * 2–4 варианта ответа, между которыми выбирает автор
+ */
+export type Options = string[];
+export type Questions = ClarifyingQuestion[];
 export type RequirementsTotal = number;
 export type FindingsTotal = number;
 export type CriticalFindingIds = string[];
@@ -134,6 +154,7 @@ export interface Report {
   set_assessment: SetAssessment;
   findings: Findings;
   checklist?: Checklist;
+  questions?: Questions;
   summary: Summary1;
   conclusion: Conclusion;
   usage?: Usage;
@@ -209,6 +230,18 @@ export interface ChecklistItem {
   answer: ChecklistAnswer;
   comment: Comment1;
   finding_ids?: FindingIds1;
+}
+/**
+ * Уточняющий вопрос автору документа: закрытый, с вариантами ответа и ссылками на дефекты.
+ */
+export interface ClarifyingQuestion {
+  id: Id2;
+  question: Question1;
+  why: Why;
+  addressee?: Addressee;
+  priority?: QuestionPriority;
+  finding_ids?: FindingIds2;
+  options?: Options;
 }
 export interface Summary1 {
   requirements_total: RequirementsTotal;

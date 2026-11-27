@@ -45,8 +45,10 @@ export function SeverityCounts({ summary }: { summary?: RunSummary | null }) {
   )
 }
 
-export function ReadinessBadge({ ready }: { ready?: boolean }) {
+export function ReadinessBadge({ ready, plain = false }: { ready?: boolean; plain?: boolean }) {
   const { t } = useTranslation()
   if (ready === undefined) return null
-  return <Badge variant={ready ? 'success' : 'destructive'}>{ready ? t('report.readyYes') : t('report.readyNo')}</Badge>
+  const label = ready ? t('report.readyYes') : t('report.readyNo')
+  if (plain) return <span className={ready ? 'text-sm font-semibold text-success' : 'text-sm font-semibold text-sev-critical'}>{label}</span>
+  return <Badge variant={ready ? 'success' : 'destructive'}>{label}</Badge>
 }

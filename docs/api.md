@@ -106,9 +106,15 @@ created_at, started_at?, finished_at?, error?, usage?: Usage, summary?: Summary}
 | Метод | Путь | Тело / ответ |
 | :--- | :--- | :--- |
 | GET | `/search?q&kind=requirement|finding&limit` | → `[{score, kind, text, run_id, document_name, requirement_id?, finding_id?}]` (семантический, Qdrant) |
-| GET | `/knowledge` | → `[KnowledgeItem]` |
-| POST | `/knowledge` | multipart `file` или `{title, text}` → `KnowledgeItem` (нарезка и индексация в фоне) |
+| GET | `/knowledge` | → `[KnowledgeItem]` (с `folder`, `updated_at`, `chars`) |
+| POST | `/knowledge` | multipart `file` (+ `folder`) или `{title, text, folder}` → `KnowledgeItem` (нарезка и индексация в фоне) |
+| GET | `/knowledge/{id}` | → `KnowledgeDetail`: `content`, `links` (`[[…]]` → `{title, id\|null}`), `backlinks`, `criteria` (коды упомянутых критериев) |
+| PATCH | `/knowledge/{id}` | `{title?, text?, folder?}` → `KnowledgeItem`; новый текст или название — переиндексация в фоне. Встроенное — только `folder`, иначе `409 builtin_protected` |
+| GET | `/knowledge/graph` | → `{nodes: [{id, kind: note\|folder\|criterion, title, folder, source, size}], edges: [{source, target, kind: link\|criterion\|folder}]}` |
 | DELETE | `/knowledge/{id}` | → `204` |
+
+База знаний — вики: папка — путь через «/» («Банк/Шаблоны», пусто — корень); ссылки между заметками — `[[Название]]`,
+`[[Название|подпись]]` или `[[Папка/Название]]` (сначала ищется полное название, затем без пути папки).
 
 `KnowledgeItem = {id, title, source: builtin|upload|manual, chunks, status: indexing|ready|failed, created_at}`.
 Пересказ критериев 29148/830 загружается как `builtin` при первом старте.

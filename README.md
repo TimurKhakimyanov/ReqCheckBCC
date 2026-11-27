@@ -24,13 +24,13 @@ docker compose, поэтому один раз выполните `Copy-Item .en
 **3. Запуск одной командой.** Положите документ в каталог `data/` и выполните:
 
 ```powershell
-docker compose -p reqcheck-core --profile cli run --rm --build -e GEMINI_API_KEY=ваш-ключ cli /data/requirements.pdf /data/report.md
+docker compose -p reqcheck-core --profile cli run --rm --build -e GEMINI_API_KEY=ваш-ключ cli /data/requirements.pdf /data/report.pdf
 ```
 
 Другие провайдеры:
 
 ```powershell
-docker compose -p reqcheck-core --profile cli run --rm -e ANTHROPIC_API_KEY=ваш-ключ cli /data/requirements.pdf /data/report.md --provider anthropic --model claude-opus-5-5
+docker compose -p reqcheck-core --profile cli run --rm -e ANTHROPIC_API_KEY=ваш-ключ cli /data/requirements.pdf /data/report.pdf --provider anthropic --model claude-opus-5-5
 ```
 
 Локальная модель на vLLM / Ollama (ключ не нужен). Для моделей с рассуждениями рассуждения выключаются на
@@ -39,7 +39,7 @@ docker compose -p reqcheck-core --profile cli run --rm -e ANTHROPIC_API_KEY=ва
 `samples/` (42 требования) прогон на `mimo-v2.6-flash` занимает около 8 минут:
 
 ```powershell
-docker compose -p reqcheck-core --profile cli run --rm cli /data/requirements.md /data/report.md --provider openai_compatible --base-url http://vllm.example.local:8000/v1 --model mimo-v2.6-flash --concurrency 4 --max-tokens 48000 --timeout 900 --extra-body '{\"chat_template_kwargs\":{\"enable_thinking\":false}}' --extra-body-set-review '{\"chat_template_kwargs\":{\"enable_thinking\":true}}'
+docker compose -p reqcheck-core --profile cli run --rm cli /data/requirements.md /data/report.pdf --provider openai_compatible --base-url http://vllm.example.local:8000/v1 --model mimo-v2.6-flash --concurrency 4 --max-tokens 48000 --timeout 900 --extra-body '{\"chat_template_kwargs\":{\"enable_thinking\":false}}' --extra-body-set-review '{\"chat_template_kwargs\":{\"enable_thinking\":true}}'
 ```
 
 (`OPENAI_API_KEY` + `--provider openai` — аналогично.)
@@ -49,11 +49,12 @@ docker compose -p reqcheck-core --profile cli run --rm cli /data/requirements.md
 Фактическая модель всегда записывается в паспорт отчёта. Temperature 0 (где модель её принимает),
 структурированный JSON-вывод: нативная JSON Schema провайдера → инструмент → схема в промпте с проверкой.
 
-**5. Отчёт** ляжет в `data/report.md`. Формат определяется по расширению (`.md`, `.json`, `.docx`, `.pdf`);
-несколько форматов сразу — `--also json,docx,pdf`. Прогресс выводится в терминал.
+**5. Отчёт** — итоговый **`data/report.pdf`**. Формат определяется по расширению (`.pdf`, `.md`, `.json`, `.docx`;
+без расширения — PDF); если основной файл не PDF, рядом всё равно создаётся `report.pdf` (отключить — `--no-pdf`).
+Ещё форматы — `--also md,json,docx`. Прогресс выводится в терминал.
 
 Флаги: `--provider gemini|openai|anthropic|openai_compatible`, `--model`, `--api-key`, `--base-url`,
-`--verify` (второй проход-критик перепроверяет дефекты), `--no-split` (не выделять подтребования),
+`--no-verify` (без верификатора — по умолчанию он опровергает каждый дефект и сливает дубли), `--no-questions` (без уточняющих вопросов автору), `--max-questions`, `--no-split` (не выделять подтребования),
 `--min-interval` (пауза между запросами, с), `--max-attempts` (повторы при 429/5xx), `--max-output-tokens`,
 `--batch-size`, `--concurrency`, `--help`. Если бесплатный Gemini отвечает `429`, агент сам ждёт и повторяет
 запрос; при частых ограничениях добавьте `--min-interval 6`.
@@ -61,7 +62,7 @@ docker compose -p reqcheck-core --profile cli run --rm cli /data/requirements.md
 Версия агента в паспорте отчёта — из `git describe` (в Docker — из `AGENT_VERSION` при сборке):
 
 ```powershell
-$env:AGENT_VERSION = git describe --always --dirty; docker compose -p reqcheck-core --profile cli run --rm --build -e GEMINI_API_KEY=ваш-ключ cli /data/requirements.pdf /data/report.md
+$env:AGENT_VERSION = git describe --always --dirty; docker compose -p reqcheck-core --profile cli run --rm --build -e GEMINI_API_KEY=ваш-ключ cli /data/requirements.pdf /data/report.pdf
 ```
 
 ### Как агент проверяет
@@ -72,12 +73,18 @@ $env:AGENT_VERSION = git describe --always --dirty; docker compose -p reqcheck-c
    и коды ответов API, абзацы НФТ/данных/интеграции). Составные требования делятся на подтребования `R-002.1`.
 3. **Правила без LLM**: размытые слова (RU/EN), «TBD / заполняются позже», пустые поля шаблона, версия документа.
 4. **Каждое требование** — по 10 критериям ISO/IEC/IEEE 29148 п. 5.2.5 / IEEE 830 п. 4.3 (пакетами).
-5. **Набор** — противоречия между требованиями, критериями приёмки и дочерней спецификацией, единицы
-   измерения, пропуски; оценка по 8 критериям п. 5.2.6.
+5. **Набор** — шесть рецензентов с разными ролями: контролёр логики правил (пересчитывает критерии приёмки по
+   правилам), контролёр согласованности спецификаций (основной документ против API, типы, единицы, коды ответов),
+   системный аналитик, тест-аналитик, архитектор интеграций, аналитик рисков и ИБ; оценка по 8 критериям п. 5.2.6.
 6. **Проверка цитат кодом**: каждая цитата модели ищется в тексте (нормализация, нечёткий поиск); дефект без
    подтверждённой цитаты отбрасывается или привязывается к месту требования с пометкой.
-7. Чек-лист «Ревью требований» (если есть в документе), **сводка** и **итог** (можно ли начинать разработку
-   и тестирование, что исправить первым).
+7. **Верификатор**: отдельный агент пытается опровергнуть каждый дефект по тексту и выравнивает критичность, затем
+   дубли от разных агентов сливаются (модель предлагает группы, код сливает только замечания об одном месте).
+   Отключается флагом `--no-verify`.
+8. Чек-лист «Ревью требований» (если есть в документе), **уточняющие вопросы автору** (закрытые, с вариантами
+   ответа и приоритетом), **сводка** и **итог** (можно ли начинать разработку и тестирование, что исправить первым).
+
+Рецензенты по ролям, верификатор и уточняющие вопросы перенесены из bbc-agent.
 
 Замер полноты на примере: `packages/core/eval/recall.py` + эталон `packages/core/eval/requirements_md_reference.json`
 (эталон в промптах не используется).
@@ -302,8 +309,10 @@ docker compose --profile mock up -d --build web-mock   # http://localhost:8081, 
 - **Языки**: файл на язык в `services/web/src/locales/` (`ru.json`, `en.json`, черновик `kk.json`). Новый язык — новый файл,
   он появится в переключателе сам. Недостающие казахские строки показываются по-русски.
 - **Тема и стиль**: все цвета, радиусы, тени и шрифты — CSS-переменные в `services/web/src/index.css` (светлая и тёмная).
-  Визуальный язык: тёплый акцент `--primary` на почти белом/почти чёрном фоне, тонкие границы, многослойные мягкие тени
-  (`shadow-card`, `shadow-raised`, `shadow-primary`), моноширинные метки `.label-mono`, фон-сетка `.bg-grid`.
+  Визуальный язык: тёмный фон с точками `.bg-dots` (тёмная тема по умолчанию), тонкие рамки вместо теней, прямые углы,
+  моноширинные метки `.label-mono` с цветным квадратиком, оранжевый акцент `--primary` для «агент работает», бирюзовый
+  `--teal` для «готово». Экран прогона — изометрический конвейер агентов (`features/runs/AgentScene.tsx`, стили `.rc-scene`,
+  `.rc-st`, `.rc-layer` в `index.css`); вкладка «Сводка и итог» — статистика отчёта (`features/report/SummaryTab.tsx`).
   Шрифты Geist и Geist Mono (OFL) встроены в сборку — работают без интернета. Перекраска — правка токенов, компоненты не трогаются.
 - **Типы отчёта** генерируются из JSON Schema контракта и лежат в git (`src/api/report.gen.ts`); тест падает, если они устарели.
   Перегенерировать после изменения контракта (в контейнере, на хосте ничего не ставится):

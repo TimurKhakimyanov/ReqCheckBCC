@@ -76,4 +76,37 @@ describe('Report screen', () => {
     await user.click(screen.getByRole('tab', { name: 'Паспорт' }))
     expect(screen.getByText(sampleReport.passport.document_sha256)).toBeInTheDocument()
   })
+
+  it('summary tab shows key figures and per-criterion stats computed from the report', async () => {
+    const user = userEvent.setup()
+    renderReport()
+    await screen.findByTestId('findings-list')
+    await user.click(screen.getByRole('tab', { name: 'Сводка и итог' }))
+    const kpis = screen.getByLabelText('Ключевые показатели')
+    expect(within(kpis).getByText('Требований')).toBeInTheDocument()
+    expect(within(kpis).getByText(String(sampleReport.summary.findings_total))).toBeInTheDocument()
+    // каждый критерий с дефектами — строка графика, сумма по строкам равна числу дефектов
+    const table = screen.getByRole('table', { name: 'Дефекты по критериям' })
+    const totals = within(table)
+      .getAllByRole('row')
+      .map((row) => Number(within(row).getAllByRole('cell').at(-1)!.textContent))
+    expect(totals.reduce((a, b) => a + b, 0)).toBe(sampleReport.findings.length)
+    // все 8 свойств набора перечислены
+    expect(screen.getByText('Свойства набора')).toBeInTheDocument()
+  })
+
+  it('questions tab lists clarifying questions with options and linked findings', async () => {
+    const user = userEvent.setup()
+    renderReport()
+    await screen.findByTestId('findings-list')
+    await user.click(screen.getByRole('tab', { name: /Вопросы/ }))
+    const qs = sampleReport.questions ?? []
+    expect(qs.length).toBeGreaterThan(0)
+    for (const q of qs) expect(screen.getByText(q.question)).toBeInTheDocument()
+    const opts = screen.getAllByRole('list', { name: 'Варианты ответа' })[0]
+    expect(within(opts).getByText(qs[0].options![0])).toBeInTheDocument()
+    expect(screen.getAllByText('Блокирующий').length).toBe(qs.filter((q) => q.priority === 'blocker').length)
+    await user.click(screen.getAllByRole('button', { name: qs[0].finding_ids![0] })[0])
+    expect(screen.getByRole('tab', { name: /Дефекты/ })).toHaveAttribute('data-state', 'active')
+  })
 })

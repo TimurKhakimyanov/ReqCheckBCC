@@ -21,9 +21,24 @@ def test_cli_fake_provider_writes_reports(sample_path, tmp_path, capsys):
 
 def test_cli_format_flag_and_quiet(sample_path, tmp_path, capsys):
     out = tmp_path / "report.out"
-    assert main([str(sample_path), str(out), "--provider", "fake", "--format", "json", "-q"]) == 0
+    assert main([str(sample_path), str(out), "--provider", "fake", "--format", "json", "-q", "--no-pdf"]) == 0
     Report.model_validate_json(out.read_text(encoding="utf-8"))
     assert "%]" not in capsys.readouterr().err
+    assert not out.with_suffix(".pdf").exists()
+
+
+def test_cli_always_writes_pdf_next_to_report(sample_path, tmp_path):
+    out = tmp_path / "report.md"
+    assert main([str(sample_path), str(out), "--provider", "fake", "-q"]) == 0
+    assert out.read_text(encoding="utf-8").startswith("# Отчёт")
+    assert out.with_suffix(".pdf").read_bytes()[:5] == b"%PDF-"
+
+
+def test_cli_output_without_extension_is_pdf(sample_path, tmp_path):
+    out = tmp_path / "report"
+    assert main([str(sample_path), str(out), "--provider", "fake", "-q"]) == 0
+    assert out.with_suffix(".pdf").read_bytes()[:5] == b"%PDF-"
+    assert not out.exists()
 
 
 def test_cli_errors(sample_path, tmp_path):

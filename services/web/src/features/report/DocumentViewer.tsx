@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Finding } from '@/api/types'
 import { buildSegments, collectRanges, topSeverity } from './highlight'
+import { prettyText } from './prettyText'
 
 const esc = (s: string) => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&'))
 
@@ -52,13 +53,13 @@ export const DocumentViewer = memo(function DocumentViewer({
   return (
     <div ref={ref} className="h-full overflow-y-auto" data-testid="document-viewer">
       {unlocated.length > 0 && (
-        <div className="sticky top-0 z-10 border-b bg-card/95 px-6 py-2 text-xs text-muted-foreground backdrop-blur">
+        <div className="sticky top-0 z-10 border-b bg-card/95 px-6 py-2.5 text-xs text-muted-foreground backdrop-blur">
           {t('report.unlocated', { count: unlocated.length, ids: unlocated.map((f) => f.id).join(', ') })}
         </div>
       )}
-      <div className="mx-auto max-w-[78ch] px-6 py-6 text-[0.9375rem] leading-7 break-words whitespace-pre-wrap">
+      <div className="mx-auto max-w-[78ch] px-6 py-8 text-[0.9375rem] leading-[1.85] break-words whitespace-pre-wrap text-foreground/90">
         {segments.map((s) => {
-          if (!s.ranges.length) return <span key={s.start}>{s.text}</span>
+          if (!s.ranges.length) return <span key={s.start}>{prettyText(text, s.start, s.text)}</span>
           const isFocus = s.ranges.some((r) => r.findingId === '__focus')
           const real = s.ranges.filter((r) => r.findingId !== '__focus')
           if (!real.length)
@@ -87,8 +88,10 @@ export const DocumentViewer = memo(function DocumentViewer({
                 onSelect(ids[idx], r.locIndex)
               }}
             >
-              {first && first.findingId === ids[0] && <sup className="mr-0.5 text-[0.6rem] font-semibold opacity-70 select-none">{ids[0]}</sup>}
-              {s.text}
+              {first && first.findingId === ids[0] && (
+                <sup className="mr-1 rounded-full bg-card px-1.5 py-px align-[0.35em] font-mono text-[0.6rem] font-medium shadow-xs select-none">{ids[0]}</sup>
+              )}
+              {prettyText(text, s.start, s.text)}
             </mark>
           )
         })}

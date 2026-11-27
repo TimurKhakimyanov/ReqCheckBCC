@@ -1,18 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import {
-  BarChart3,
-  BookOpen,
-  FileText,
-  LogOut,
-  Menu,
-  PanelLeftClose,
-  PanelLeftOpen,
-  ScrollText,
-  Search,
-  Settings,
-  ShieldCheck,
-  X,
-} from 'lucide-react'
+import { LogOut, Menu, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet, useLocation } from 'react-router'
@@ -24,27 +11,52 @@ import { cn } from '@/shared/utils'
 import { LanguageSwitch, ThemeToggle } from './Preferences'
 
 const NAV = [
-  { to: '/documents', icon: FileText, key: 'nav.documents' },
-  { to: '/search', icon: Search, key: 'nav.search' },
-  { to: '/knowledge', icon: BookOpen, key: 'nav.knowledge' },
-  { to: '/usage', icon: BarChart3, key: 'nav.usage' },
-  { to: '/audit', icon: ScrollText, key: 'nav.audit' },
-  { to: '/settings', icon: Settings, key: 'nav.settings' },
+  { to: '/documents', key: 'nav.documents' },
+  { to: '/search', key: 'nav.search' },
+  { to: '/knowledge', key: 'nav.knowledge' },
+  { to: '/usage', key: 'nav.usage' },
+  { to: '/audit', key: 'nav.audit' },
+  { to: '/settings', key: 'nav.settings' },
 ] as const
 
-function Brand({ compact = false }: { compact?: boolean }) {
+/** Знак ReqCheck: квадрат с толстой рамкой, как в референсе. */
+export function Brand({ className }: { className?: string }) {
   const { t } = useTranslation()
   return (
-    <div className="flex items-center gap-2 px-1.5 font-medium tracking-tight">
-      <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-primary">
-        <ShieldCheck className="size-4" />
+    <span className={cn('flex items-center gap-2.5 text-base font-semibold tracking-tight', className)}>
+      <span aria-hidden className="inline-flex size-7 items-center justify-center rounded-[9px] bg-foreground">
+        <span className="size-2.5 rounded-[3px] border-2 border-background" />
       </span>
-      {!compact && t('app.name')}
-    </div>
+      {t('app.name')}
+    </span>
   )
 }
 
-function SidebarContent({ onNavigate, compact = false, onToggle }: { onNavigate?: () => void; compact?: boolean; onToggle?: () => void }) {
+function NavLinks({ onNavigate, vertical = false }: { onNavigate?: () => void; vertical?: boolean }) {
+  const { t } = useTranslation()
+  return (
+    <>
+      {NAV.map(({ to, key }) => (
+        <NavLink
+          key={to}
+          to={to}
+          onClick={onNavigate}
+          className={({ isActive }) =>
+            cn(
+              'text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground',
+              vertical ? 'mx-2 flex min-h-11 items-center rounded-xl px-3' : 'rounded-full px-3 py-1.5',
+              isActive && 'bg-secondary font-medium text-foreground',
+            )
+          }
+        >
+          {t(key)}
+        </NavLink>
+      ))}
+    </>
+  )
+}
+
+function UserBlock({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation()
   const { data: me } = useMe()
   const qc = useQueryClient()
@@ -54,116 +66,86 @@ function SidebarContent({ onNavigate, compact = false, onToggle }: { onNavigate?
     qc.setQueryData(ME_KEY, null)
   }
   return (
-    <div className="flex h-full flex-col gap-4 p-3">
-      <div className={cn('flex items-center', compact ? 'flex-col gap-2' : 'justify-between')}>
-        <Brand compact={compact} />
-        {onToggle && (
-          <Button variant="ghost" size="icon-sm" onClick={onToggle} aria-label={t(compact ? 'nav.expand' : 'nav.collapse')} title={t(compact ? 'nav.expand' : 'nav.collapse')}>
-            {compact ? <PanelLeftOpen /> : <PanelLeftClose />}
-          </Button>
-        )}
-      </div>
-      <nav className="flex flex-1 flex-col gap-1">
-        {!compact && <div className="label-mono px-2.5 pt-2 pb-1">[ ReqCheck ]</div>}
-        {NAV.map(({ to, icon: Icon, key }) => (
-          <NavLink
-            key={to}
-            to={to}
-            onClick={onNavigate}
-            title={compact ? t(key) : undefined}
-            aria-label={compact ? t(key) : undefined}
-            className={({ isActive }) =>
-              cn(
-                'press flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground/75 hover:bg-accent hover:text-foreground',
-                compact && 'justify-center',
-                isActive && 'bg-card font-[450] text-foreground shadow-card hover:bg-card dark:bg-accent [&_svg]:text-primary',
-              )
-            }
-          >
-            <Icon className="size-4" />
-            {!compact && t(key)}
-          </NavLink>
-        ))}
-      </nav>
-      {USE_MOCKS && !compact && (
-        <div className="rounded-lg border border-dashed border-primary/40 bg-primary-tint px-2.5 py-2 text-xs text-foreground/80">{t('app.mockMode')}</div>
+    <div className="flex items-center gap-1">
+      <LanguageSwitch />
+      <ThemeToggle />
+      {!compact && (
+        <span className="ml-1 hidden items-center gap-2 text-sm text-muted-foreground xl:flex" title={`v${APP_VERSION}`}>
+          <span className="inline-flex size-7 items-center justify-center rounded-full bg-[#eef2ff] text-xs font-semibold text-[#3730a3] uppercase dark:bg-accent dark:text-foreground">
+            {me?.username?.slice(0, 1)}
+          </span>
+          {me?.username}
+        </span>
       )}
-      <div className={cn('flex items-center justify-between gap-1 border-t pt-3', compact && 'flex-col')}>
-        {!compact && (
-          <div className="min-w-0 px-1">
-            <div className="truncate text-sm font-medium">{me?.username}</div>
-            <div className="text-xs text-muted-foreground">v{APP_VERSION}</div>
-          </div>
-        )}
-        <div className={cn('flex items-center', compact && 'flex-col')}>
-          <LanguageSwitch />
-          <ThemeToggle />
-          <Button variant="ghost" size="icon-sm" onClick={logout} aria-label={t('auth.signOut')} title={t('auth.signOut')}>
-            <LogOut />
-          </Button>
-        </div>
-      </div>
+      <Button variant="ghost" size="icon-sm" onClick={logout} aria-label={t('auth.signOut')} title={t('auth.signOut')}>
+        <LogOut />
+      </Button>
     </div>
   )
 }
 
-const COLLAPSE_KEY = 'reqcheck.sidebar.collapsed'
-
 export function AppShell() {
   const [open, setOpen] = useState(false)
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(COLLAPSE_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
-  const toggle = () =>
-    setCollapsed((c) => {
-      try {
-        localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
-      } catch {
-        /* ignore */
-      }
-      return !c
-    })
   const { t } = useTranslation()
   const loc = useLocation()
-  // Экран отчёта занимает всю высоту и сам управляет прокруткой панелей.
-  const fullBleed = /^\/runs\//.test(loc.pathname)
+  // Экран прогона и отчёта занимает всю высоту и сам управляет прокруткой панелей.
+  const fullBleed = /^\/(runs\/|knowledge)/.test(loc.pathname)
   return (
-    <div className="flex h-full">
-      <aside className={cn('hidden shrink-0 border-r bg-sidebar text-sidebar-foreground lg:block', collapsed ? 'w-16' : 'w-60')}>
-        <SidebarContent compact={collapsed} onToggle={toggle} />
-      </aside>
+    <div className="bg-dots flex h-full flex-col">
+      <header className="shrink-0 px-3 pt-3 sm:px-4">
+        <nav
+          aria-label={t('nav.menu')}
+          className="mx-auto flex h-14 max-w-[1440px] items-center justify-between gap-4 rounded-2xl bg-card px-3 shadow-card sm:px-4"
+        >
+          <NavLink to="/documents" className="shrink-0" aria-label={t('app.name')}>
+            <Brand />
+          </NavLink>
+          <div className="hidden items-center gap-1 lg:flex">
+            <NavLinks />
+          </div>
+          <div className="hidden lg:block">
+            <UserBlock />
+          </div>
+          <Button variant="ghost" size="icon-sm" className="lg:hidden" onClick={() => setOpen(true)} aria-label={t('nav.menu')}>
+            <Menu />
+          </Button>
+        </nav>
+        {USE_MOCKS && (
+          <div className="mx-auto mt-2 max-w-[1440px] rounded-xl bg-primary-tint px-3 py-1.5 text-xs text-foreground/80">
+            {t('app.mockMode')}
+          </div>
+        )}
+      </header>
+
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-64 border-r bg-sidebar shadow-xl">
-            <Button variant="ghost" size="icon-sm" className="absolute top-3 right-3" onClick={() => setOpen(false)} aria-label={t('common.close')}>
-              <X />
-            </Button>
-            <SidebarContent onNavigate={() => setOpen(false)} />
+          <div className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
+          <aside className="absolute inset-y-2 right-2 flex w-72 flex-col rounded-2xl bg-card shadow-raised">
+            <div className="flex h-14 items-center justify-between px-4">
+              <Brand />
+              <Button variant="ghost" size="icon-sm" onClick={() => setOpen(false)} aria-label={t('common.close')}>
+                <X />
+              </Button>
+            </div>
+            <nav className="flex flex-col gap-0.5">
+              <NavLinks vertical onNavigate={() => setOpen(false)} />
+            </nav>
+            <div className="mt-auto border-t p-3">
+              <UserBlock compact />
+            </div>
           </aside>
         </div>
       )}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 items-center gap-2 border-b bg-background/90 px-3 backdrop-blur lg:hidden">
-          <Button variant="ghost" size="icon-sm" onClick={() => setOpen(true)} aria-label={t('nav.menu')}>
-            <Menu />
-          </Button>
-          <Brand />
-        </header>
-        <main className={cn('min-h-0 flex-1', fullBleed ? 'overflow-hidden' : 'overflow-y-auto')}>
-          {fullBleed ? (
+
+      <main className={cn('min-h-0 flex-1', fullBleed ? 'overflow-hidden' : 'overflow-y-auto')}>
+        {fullBleed ? (
+          <Outlet />
+        ) : (
+          <div className="mx-auto min-h-full w-full max-w-7xl px-4 py-8 lg:px-10">
             <Outlet />
-          ) : (
-            <div className="mx-auto w-full max-w-6xl px-4 py-6 lg:px-8">
-              <Outlet />
-            </div>
-          )}
-        </main>
-      </div>
+          </div>
+        )}
+      </main>
     </div>
   )
 }

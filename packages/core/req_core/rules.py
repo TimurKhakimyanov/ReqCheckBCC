@@ -46,6 +46,9 @@ class FindingDraft:
     source: FindingSource = FindingSource.RULE
     unverified_quotes: list[str] = field(default_factory=list)
     id: str = ""
+    question: str = ""  # уточняющий вопрос автору, если рецензент его предложил
+    addressee: str = ""
+    origin: str = ""  # какой агент нашёл: inspector, reviewer:<роль>, rules
 
 
 def overlap(a: tuple[int, int], b: tuple[int, int]) -> int:

@@ -18,6 +18,7 @@ from req_contracts import (
     CheckVerdict,
     ChecklistAnswer,
     ChecklistItem,
+    ClarifyingQuestion,
     Conclusion,
     Criterion,
     CriterionCheck,
@@ -26,6 +27,7 @@ from req_contracts import (
     FindingScope,
     FindingSource,
     ParsedDocument,
+    QuestionPriority,
     Report,
     Requirement,
     RequirementAssessment,
@@ -164,6 +166,24 @@ def build(text: str) -> Report:
                           finding_ids=["D-001", "D-006"]),
             ChecklistItem(question="Поддерживается версионность документа / зафиксирована", answer=ChecklistAnswer.NO,
                           comment="Версия и дата не заполнены.", finding_ids=["D-007"]),
+        ],
+        questions=[
+            ClarifyingQuestion(
+                id="Q-01", priority=QuestionPriority.BLOCKER, addressee="Business owner",
+                question="Какая дата определяет месяц покупки для счётчика расходов: дата совершения покупки "
+                "или дата её проведения?",
+                why="Правило Ф-2 и критерий приёмки дают разный месяц для покупки 31 января — счётчик и push "
+                "реализуют по-разному.",
+                finding_ids=["D-001"], options=["Дата совершения покупки", "Дата проведения покупки"],
+            ),
+            ClarifyingQuestion(
+                id="Q-02", priority=QuestionPriority.BLOCKER, addressee="Product owner",
+                question="После смены порога в том же месяце нужно ли отправить push повторно, если новый "
+                "порог достигнут?",
+                why="Лимит «один push в месяц» противоречит правилу смены порога — неясно, сколько push получит клиент.",
+                finding_ids=["D-002"],
+                options=["Да, повторный push при новом пороге", "Нет, не больше одного push в месяц"],
+            ),
         ],
         summary=Summary(requirements_total=len(req), findings_total=len(findings), by_severity=by_sev,
                         critical_finding_ids=[f.id for f in findings if f.severity == Severity.CRITICAL]),

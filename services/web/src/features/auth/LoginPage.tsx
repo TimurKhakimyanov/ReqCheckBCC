@@ -1,15 +1,16 @@
 import { useMutation } from '@tanstack/react-query'
-import { ShieldCheck } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Navigate, useNavigate, useSearchParams } from 'react-router'
 import { api, ApiError } from '@/api/client'
 import { useMe, useSetMe } from '@/app/auth'
+import { Brand } from '@/components/layout/AppShell'
 import { LanguageSwitch, ThemeToggle } from '@/components/layout/Preferences'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
 import { ErrorNote, Spinner } from '@/components/ui/misc'
+import { ConveyorScene } from '@/features/runs/AgentScene'
+import type { AgentState } from '@/features/runs/agents'
 import { resources } from '@/i18n'
 import { USE_MOCKS } from '@/shared/env'
 
@@ -42,35 +43,51 @@ export function LoginPage() {
     login.error instanceof ApiError && login.error.status === 401 ? t('auth.invalid') : login.error ? login.error.message : null
 
   return (
-    <div className="bg-grid relative flex min-h-full flex-col bg-background">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(ellipse_at_top,var(--primary-tint),transparent_70%)]"
-      />
-      <div className="relative flex justify-end gap-1 p-3">
-        <LanguageSwitch />
-        <ThemeToggle />
-      </div>
-      <div className="relative flex flex-1 items-center justify-center p-4 pb-24">
-        <Card className="w-full max-w-sm shadow-raised">
-          <CardHeader className="items-center text-center">
-            <div className="label-mono mb-3">[ ISO 29148 · IEEE 830 ]</div>
-            <div className="mb-2 flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-primary">
-              <ShieldCheck className="size-6" />
+    <div className="bg-dots flex min-h-full">
+      <div className="mx-auto flex w-full max-w-[1440px] flex-wrap border-x">
+        <div className="flex flex-[1_1_440px] flex-col gap-10 border-r bg-background/80 px-6 py-8 sm:px-14">
+          <div className="flex items-center justify-between">
+            <Brand />
+            <div className="flex gap-1">
+              <LanguageSwitch />
+              <ThemeToggle />
             </div>
-            <CardTitle className="text-2xl font-medium tracking-[-0.02em]">{t('app.name')}</CardTitle>
-            <CardDescription>{t('auth.subtitle')}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form className="grid gap-4" onSubmit={submit}>
+          </div>
+          <div className="flex flex-1 flex-col justify-center gap-8">
+            <div className="flex flex-col gap-4">
+              <div className="label-mono flex items-center gap-2">
+                <span aria-hidden className="inline-block size-1.5 bg-primary" />
+                ISO 29148 · IEEE 830
+              </div>
+              <h1 className="text-[2.75rem] leading-[1.04] font-medium tracking-[-0.035em]">
+                {t('auth.heroA')}
+                <br />
+                <span className="text-muted-foreground">{t('auth.heroB')}</span>
+              </h1>
+              <p className="text-[0.9375rem] text-muted-foreground">{t('auth.subtitle')}</p>
+            </div>
+            <form className="grid max-w-sm gap-4" onSubmit={submit}>
               <div className="grid gap-2">
-                <Label htmlFor="username">{t('auth.username')}</Label>
-                <Input id="username" autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} required />
+                <Label htmlFor="username" className="label-mono">
+                  {t('auth.username')}
+                </Label>
+                <Input
+                  id="username"
+                  className="h-11 font-mono"
+                  autoComplete="username"
+                  autoFocus
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="password">{t('auth.password')}</Label>
+                <Label htmlFor="password" className="label-mono">
+                  {t('auth.password')}
+                </Label>
                 <Input
                   id="password"
+                  className="h-11 font-mono"
                   type="password"
                   autoComplete="current-password"
                   value={password}
@@ -79,15 +96,20 @@ export function LoginPage() {
                 />
               </div>
               {error && <ErrorNote error={error} />}
-              <Button type="submit" disabled={login.isPending || !username || !password}>
+              <Button type="submit" size="lg" className="mt-2 h-12" disabled={login.isPending || !username || !password}>
                 {login.isPending && <Spinner />}
                 {t('auth.signIn')}
               </Button>
-              {USE_MOCKS && <p className="text-center text-xs text-muted-foreground">{t('auth.mockHint')}</p>}
+              {USE_MOCKS && <p className="text-xs text-muted-foreground">{t('auth.mockHint')}</p>}
             </form>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+        <div className="relative hidden min-h-[560px] flex-[1.3_1_520px] overflow-hidden lg:block" aria-hidden>
+          <ConveyorScene states={DEMO_STATES} finished={false} />
+        </div>
       </div>
     </div>
   )
 }
+
+const DEMO_STATES: AgentState[] = ['done', 'done', 'done', 'active', 'pending', 'pending', 'pending']

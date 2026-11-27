@@ -48,6 +48,57 @@
       "title": "ChecklistItem",
       "type": "object"
     },
+    "ClarifyingQuestion": {
+      "description": "Уточняющий вопрос автору документа: закрытый, с вариантами ответа и ссылками на дефекты.",
+      "properties": {
+        "id": {
+          "description": "Q-01, Q-02…",
+          "title": "Id",
+          "type": "string"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "why": {
+          "description": "Что заблокировано без ответа",
+          "title": "Why",
+          "type": "string"
+        },
+        "addressee": {
+          "default": "Аналитик",
+          "description": "Кто отвечает: Business owner, Product owner, Аналитик…",
+          "title": "Addressee",
+          "type": "string"
+        },
+        "priority": {
+          "$ref": "#/$defs/QuestionPriority",
+          "default": "important"
+        },
+        "finding_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Finding Ids",
+          "type": "array"
+        },
+        "options": {
+          "description": "2–4 варианта ответа, между которыми выбирает автор",
+          "items": {
+            "type": "string"
+          },
+          "title": "Options",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "question",
+        "why"
+      ],
+      "title": "ClarifyingQuestion",
+      "type": "object"
+    },
     "Conclusion": {
       "properties": {
         "ready_for_development": {
@@ -277,6 +328,15 @@
       ],
       "title": "ParsedDocument",
       "type": "object"
+    },
+    "QuestionPriority": {
+      "enum": [
+        "blocker",
+        "important",
+        "minor"
+      ],
+      "title": "QuestionPriority",
+      "type": "string"
     },
     "Requirement": {
       "properties": {
@@ -589,7 +649,7 @@
   },
   "properties": {
     "schema_version": {
-      "default": "1.0",
+      "default": "1.1",
       "title": "Schema Version",
       "type": "string"
     },
@@ -628,6 +688,13 @@
         "$ref": "#/$defs/ChecklistItem"
       },
       "title": "Checklist",
+      "type": "array"
+    },
+    "questions": {
+      "items": {
+        "$ref": "#/$defs/ClarifyingQuestion"
+      },
+      "title": "Questions",
       "type": "array"
     },
     "summary": {
