@@ -13,7 +13,7 @@ import { LanguageSwitch, ThemeToggle } from './Preferences'
 const NAV = [
   { to: '/documents', key: 'nav.documents' },
   { to: '/search', key: 'nav.search' },
-  { to: '/knowledge', key: 'nav.knowledge' },
+  { to: '/agents', key: 'nav.agents' },
   { to: '/usage', key: 'nav.usage' },
   { to: '/audit', key: 'nav.audit' },
   { to: '/settings', key: 'nav.settings' },

@@ -9,6 +9,7 @@
   "nav": {
     "documents": "Documents",
     "search": "Search",
+    "agents": "Agents",
     "knowledge": "Knowledge base",
     "usage": "Token usage",
     "audit": "Audit log",
@@ -1087,5 +1088,274 @@
     "emptyHint": "The agents need a language model. Connect Gemini, OpenAI, Anthropic or your own server — the wizard walks you through it.",
     "connectedCount_one": "{{count}} of {{total}} providers connected",
     "connectedCount_other": "{{count}} of {{total}} providers connected"
+  },
+  "agentsPage": {
+    "eyebrow": "Architecture",
+    "title": "Agents",
+    "subtitle": "How ReqCheck checks a document: run stages, LLM agents and code checks. Click an agent to see its role, inputs, outputs and links.",
+    "stats": {
+      "llm": "LLM agents",
+      "code": "Code checks",
+      "stages": "Run stages",
+      "criteria": "29148 / 830 criteria"
+    },
+    "kind": {
+      "llm": "LLM agent",
+      "code": "code, no LLM",
+      "data": "data"
+    },
+    "parallel": "in parallel",
+    "schemeTitle": "Run pipeline",
+    "lanes": {
+      "input": "Input",
+      "parsing": "Parsing",
+      "segmenting": "Splitting",
+      "rule_checks": "Rules",
+      "checking_requirements": "Requirements",
+      "checking_set": "Set",
+      "quotes": "Quotes",
+      "verifying": "Verification",
+      "rendering": "Report",
+      "chat": "After the run"
+    },
+    "details": {
+      "title": "About the agent",
+      "pick": "Pick an agent in the pipeline",
+      "pickHint": "You will see what it does, what it receives and who gets its result. Related agents are highlighted.",
+      "input": "Receives",
+      "output": "Returns",
+      "from": "Takes results from",
+      "to": "Passes to",
+      "criteria": "Responsible for criteria",
+      "how": "How it works",
+      "code": "In code",
+      "openKb": "Open the knowledge base"
+    },
+    "reviewerNote": "Six reviewers work in parallel and look at the whole requirement set. Each first writes working notes (up to 350 words), then states defects for its criteria and may suggest a question for the author.",
+    "reviewerInput": "Requirement list, the whole document, set defects already found by rules",
+    "reviewerOutput": "Set defects, verdicts for its criteria, questions for the author",
+    "reviewersChip": "Set reviewers ×6",
+    "items": {
+      "document": {
+        "name": "Document",
+        "short": "PDF, DOCX, MD, TXT",
+        "role": "The requirements file the user uploaded. It is stored in S3; a Celery worker performs the run.",
+        "input": "Upload in Documents",
+        "output": "File to parse",
+        "how": "POST /api/documents puts the file into S3, POST /api/runs queues the task.\nThe worker downloads the file and takes model settings from the account page; keys are stored encrypted in Postgres.\nRun options go to the core: batch size, concurrency, verifier, questions for the author."
+      },
+      "knowledge": {
+        "name": "Knowledge base",
+        "short": "Qdrant, into the system prompt",
+        "role": "The bank's glossary, templates and rules. Before a run the worker finds fragments close to the document and passes them to the agents.",
+        "input": "Knowledge base notes and files",
+        "output": "Up to 6 fragments in the system prompt",
+        "how": "Notes are split into fragments and indexed in Qdrant.\nThe worker searches by the first 3,000 characters of the document; the core already knows the built-in standards summary.\nFragments go into the system prompt of every LLM agent in the run and of the report chat."
+      },
+      "parser": {
+        "name": "Parsing",
+        "short": "text, pages, sections",
+        "role": "Reads PDF, DOCX, MD and TXT and normalizes the text. All report locations and quotes are offsets in this text.",
+        "input": "File",
+        "output": "Normalized text with page bounds and headings",
+        "how": "For PDF, page bounds are kept so each defect has a page number.\nSection headings are found by code; they are used for splitting and for location labels in the report.\nA PDF without a text layer gives a clear error: there is no OCR yet."
+      },
+      "segmenter": {
+        "name": "Splitter",
+        "short": "requirements R-001…",
+        "role": "Picks out individual requirements and numbers them R-001… Compound requirements are split into parts R-002.1, R-002.2.",
+        "input": "Document text and candidates found by code",
+        "output": "Requirement list with locations in the text",
+        "how": "A long document is cut by headings into fragments of up to 40,000 characters, one request each.\nCode finds candidates beforehand (numbered items, “F-N”, table rows) and hints them to the model.\nCode looks up each model requirement in the text; missing ones are dropped, 80% overlaps are merged.\nCandidates the model missed are added from the code hints."
+      },
+      "rules": {
+        "name": "Rules",
+        "short": "instant, no LLM",
+        "role": "Deterministic checks: vague words, “TBD” and “to be filled in later”, empty template fields and rows, unfilled checklist, missing document version, compound requirements.",
+        "input": "Text and requirement list",
+        "output": "Defects with source “rule”",
+        "how": "Works the same on every run and spends no tokens.\nFindings go to the inspector and reviewers as “already found” so the model does not repeat them.\nThe verifier cannot reject a rule defect, only change its severity."
+      },
+      "inspector": {
+        "name": "Requirement inspector",
+        "short": "10 criteria, in batches",
+        "role": "Checks each requirement against the 10 criteria of ISO/IEC/IEEE 29148 5.2.5 and IEEE 830 4.3: necessary, unambiguous, complete, verifiable and others.",
+        "input": "A batch of requirements, the whole document, rule findings for these requirements",
+        "output": "Requirement defects and criteria not applicable to a requirement",
+        "how": "Requirements go in batches (6 by default); batches run in parallel per the concurrency setting.\nThe request includes the whole document so the model sees the context.\nThe model may mark a criterion as not applicable, then it does not count as failed.\nProgress is reported per requirement: the run screen shows “12 of 42”."
+      },
+      "logic": {
+        "name": "Business logic controller",
+        "short": "conflicting rules",
+        "role": "Looks for conflicts between business rules and between rules and acceptance criteria.",
+        "how": "Lists the rules as “condition → result” and compares pairs that touch the same object.\nRecomputes every acceptance criterion using the document's rules: dates, amounts, limits.\nChecks the document goal and process diagrams against the rules."
+      },
+      "contract": {
+        "name": "Specification consistency controller",
+        "short": "document vs API, terms",
+        "role": "Looks for mismatches between the main document and API and data specifications, inside contracts, in terms and units.",
+        "how": "Checks method, URL, parameters, response codes and examples in the API specification.\nChecks that one value has one type and format in request, response and storage.\nLooks for one rule described differently in different places."
+      },
+      "analyst": {
+        "name": "Systems analyst",
+        "short": "gaps, priorities",
+        "role": "Looks for what is missing: alternative scenarios, errors, entity life cycle, glossary, priorities, version and change history.",
+        "how": "Walks each function through main and alternative scenarios, errors, limits and cancellation.\nLooks for combinations of rules that are not described anywhere.\nChecks message texts, UI states and input validation."
+      },
+      "qa": {
+        "name": "Test analyst",
+        "short": "can the work be accepted",
+        "role": "Judges whether tests can be designed from the document: do requirements have acceptance criteria and is the result observable.",
+        "how": "Finds functional requirements without acceptance criteria.\nChecks that preconditions are complete and the expected result is unambiguous.\nNames missing negative and boundary checks and measurable thresholds."
+      },
+      "architect": {
+        "name": "Integration architect",
+        "short": "traceability, integrations",
+        "role": "Checks traceability “goal → requirements → interfaces → data → acceptance” and feasibility at the system level.",
+        "how": "Matches operations in the main document and child specifications.\nReviews HTTP methods, idempotency, error format, data model.\nLooks for undescribed races, redelivery, unavailable neighbour systems, rollback."
+      },
+      "security": {
+        "name": "Risk and security analyst",
+        "short": "data, access, audit",
+        "role": "Reads the document as the bank's information security: personal and payment data, authorization, audit, operational risks.",
+        "how": "Checks what ends up in notifications, URLs and logs, and whether it is masked.\nLooks for resource ownership checks and brute-force protection.\nAssesses risks of false or unsent notifications and of release rollback."
+      },
+      "quotes": {
+        "name": "Quote check",
+        "short": "every quote is in the text",
+        "role": "Code looks up every quote the model gave in the document text. A found quote gets an exact location, page number and a “verified” mark.",
+        "input": "Defect candidates from rules, the inspector and reviewers",
+        "output": "Defects with verified locations, without exact duplicates",
+        "how": "First a search normalizing spaces, quotes and case, then a fuzzy one.\nIf a quote is not found, the defect is tied to the requirement's location with a note; without a requirement it is dropped.\nThen code merges defects with the same location and criterion."
+      },
+      "verifier": {
+        "name": "Verifier",
+        "short": "tries to refute every defect",
+        "role": "An independent re-check agent: tries to refute each defect against the document text and aligns severity.",
+        "input": "All defect candidates and the document",
+        "output": "Keep / drop decision and severity for each",
+        "how": "Defects go in groups of 20, groups run in parallel; unanswered ones are retried in groups of 8.\nDrops misreadings, generic phrases and formal nitpicks; keeps gaps and conflicts.\nDoes not drop rule defects, only changes severity. Without a model answer the defect stays.\nEnabled by the “Verifier” option (on by default)."
+      },
+      "merger": {
+        "name": "Duplicate merger",
+        "short": "one problem, one entry",
+        "role": "Different agents find the same problem independently. This agent groups findings where fixing one closes the others.",
+        "input": "Confirmed defects",
+        "output": "Duplicate groups, one entry per group",
+        "how": "Two passes: over the whole list and separately over findings about one place in the document.\nCode merges a group only if findings are related: same place, shared requirement or same set criterion.\nWhen in doubt the model does not merge."
+      },
+      "checklist": {
+        "name": "Checklist",
+        "short": "if the document has one",
+        "role": "If the document has a requirements review checklist, answers each item based on the check, with links to defects.",
+        "input": "Checklist items and defects",
+        "output": "Answers to checklist items",
+        "how": "Enabled by the “Fill in the review checklist” option.\nWithout a model answer, code fills the item from the defects found."
+      },
+      "questions": {
+        "name": "Questions for the author",
+        "short": "closed, with options",
+        "role": "Prepares clarifying questions the team cannot start or test without: closed, with 2–4 answer options, an addressee and a priority.",
+        "input": "Defects and questions suggested by reviewers",
+        "output": "Up to 15 questions Q-01…",
+        "how": "Questions about the same thing are merged; each lists related defects D-xxx.\nPriority: blocker, important, minor; addressee: product owner, analyst, architect, security and others.\nWithout a model answer, reviewers' questions are used."
+      },
+      "conclusion": {
+        "name": "Conclusion",
+        "short": "is the document ready",
+        "role": "Writes the conclusion: is the document ready for development and for testing, why, and what to fix first.",
+        "input": "Defects and summary",
+        "output": "Decision, rationale and top fixes",
+        "how": "Takes into account critical defects and failures of individual check batches.\nA failed batch does not stop the run but is noted in the rationale."
+      },
+      "report": {
+        "name": "Report",
+        "short": "PDF, DOCX, MD, JSON",
+        "role": "Code assembles the report: run passport, requirements, verdicts for 18 criteria, defects D-001…, checklist, questions, summary and conclusion.",
+        "input": "Results of all agents",
+        "output": "Report (schema 1.1) and exports",
+        "how": "Defects are sorted by requirement order, then by severity, and numbered D-001…\nMD, DOCX and PDF exports are stored in S3, the report in Postgres.\nRequirements and defects are indexed in Qdrant — Search finds them."
+      },
+      "chat": {
+        "name": "Report chat",
+        "short": "answers about the report",
+        "role": "Answers questions about a finished report as a text stream. Sees the report, the document text and knowledge base fragments.",
+        "input": "Report, document, conversation history, knowledge base",
+        "output": "Chat answer",
+        "how": "The API calls it directly, without the worker, and streams the answer (SSE).\nThe context includes requirements, all defects with quotes and up to 60,000 characters of the document.\nRemembers the last 20 messages of the conversation."
+      }
+    },
+    "principlesTitle": "How agents work together",
+    "principles": {
+      "known": {
+        "title": "Shared list of findings",
+        "text": "Each next agent receives what is already found, marked “do not repeat”: rules → inspector → reviewers."
+      },
+      "schema": {
+        "title": "Structured answers only",
+        "text": "The model answers with JSON in a strict schema: the provider's native mode, a tool call or a schema in the prompt. Temperature 0, retry on errors."
+      },
+      "quotes": {
+        "title": "Code checks quotes",
+        "text": "The model must quote verbatim. Code finds the quote in the text; a defect not backed by the text does not reach the report."
+      },
+      "refute": {
+        "title": "Independent re-check",
+        "text": "One agent finds, another checks. The verifier looks for why a defect is wrong, not why it is right."
+      },
+      "parallel": {
+        "title": "Parallel where possible",
+        "text": "Inspector batches, the six reviewers and verifier groups run in parallel, per the concurrency setting on the account page."
+      },
+      "failures": {
+        "title": "A partial failure does not stop the run",
+        "text": "A batch without an answer is noted in the conclusion. The run stops at once only on a settings error: no key, 401, 403, 404."
+      },
+      "progress": {
+        "title": "Live progress",
+        "text": "Agents report each step; the worker publishes events to Redis and the API passes them to the run screen."
+      },
+      "kb": {
+        "title": "Bank knowledge in every request",
+        "text": "Knowledge base fragments go into the system prompt of all LLM agents and of the report chat."
+      }
+    },
+    "matrixTitle": "Who is responsible for which criteria",
+    "matrixHint": "Columns are the agents that look for defects. The verifier re-checks defects for all criteria.",
+    "matrixCriterion": "Criterion",
+    "matrixReq": "Requirement · ISO/IEC/IEEE 29148 5.2.5",
+    "matrixSet": "Set · ISO/IEC/IEEE 29148 5.2.6",
+    "flowTitle": "Life of a defect",
+    "flowHint": "From finding to a number in the report.",
+    "flow": {
+      "found": {
+        "title": "Finding",
+        "text": "Rules, the inspector or a reviewer find a defect: quote, criterion, severity, suggestion."
+      },
+      "quote": {
+        "title": "Quote found",
+        "text": "Code finds the quote in the text and sets the exact location; otherwise the requirement's location with a note."
+      },
+      "dedupe": {
+        "title": "Exact duplicates",
+        "text": "Code merges defects with the same location and criterion."
+      },
+      "verify": {
+        "title": "Re-check",
+        "text": "The verifier keeps or drops the defect and aligns severity."
+      },
+      "merge": {
+        "title": "Merge",
+        "text": "One problem from different agents becomes one entry."
+      },
+      "number": {
+        "title": "Number D-xxx",
+        "text": "Sorting by requirements and severity, numbering, criteria verdicts."
+      },
+      "use": {
+        "title": "In the report",
+        "text": "The defect feeds the checklist, questions for the author, the conclusion and the chat."
+      }
+    }
   }
 }
