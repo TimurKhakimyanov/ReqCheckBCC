@@ -20,24 +20,22 @@
   `proxy_cache off`, `proxy_read_timeout 1h`; `client_max_body_size 50m`.
 - `/metrics`, `/livez`, `/api/metrics` — `404`, наружу не проксируются.
 
-## Новое: живые модели, локальная модель, параметры ИИ (веб уже на это рассчитан, моки так отвечают)
+## Живые модели, локальная модель, параметры ИИ
 
-Пока бэкенд не опубликовал точную форму, веб использует следующую. Если будет иначе — поправлю клиент и моки.
+Сверено с веткой бэкенда (5eb3f04): веб и моки следуют ей.
+1. `POST /providers/{p}/test` — тело `{api_key?, base_url?}` (несохранённые поля формы), ответ `{ok, latency_ms, error?, models}`.
+2. `openai_compatible` настроен по `base_url`, ключ необязателен.
+3. `GET/PUT /settings` — плоские поля `AppSettings` бэкенда (`default_provider`, `default_model`, `run_timeout_s`,
+   `min_interval_s`, `max_attempts`, `batch_size`, `concurrency`, `embeddings_provider`, `embeddings_model`,
+   `embeddings_dim`, `max_upload_mb`, `session_ttl_hours`, `embeddings_has_key`, `embeddings_key_hint`);
+   ключ — `embeddings_api_key` в `PUT`. Таймаута одного запроса в настройках нет — веб его не показывает.
+4. Тексты ошибок провайдера веб разбирает сам (код HTTP, тип исключения, `error.message`); сырой текст — в «Подробностях».
 
-1. **`POST /providers/{p}/test`** — тело `{api_key?, base_url?}` (ещё не сохранённые поля формы; пустые — из сохранённых).
-   Ответ `200 {ok, latency_ms, error?, models?: [string]}`; `models` заполняет «Модель по умолчанию».
-2. **`openai_compatible`** настроен, если задан `base_url`; ключ необязателен. `has_key` может быть `false`.
-   `POST /runs` без ключа у `openai_compatible`, но с адресом — допустим.
-3. **`GET /settings` → `AppSettings`, `PUT /settings` (частичное тело) → `AppSettings`:**
-   ```
-   {default_provider: ProviderName|null, default_model: str|null,
-    run_timeout_s, request_timeout_s, min_interval_s, max_attempts, batch_size, concurrency,
-    embeddings: {provider: local|gemini|openai, model, has_key, key_hint},  updated_at}
-   ```
-   В `PUT` ключ эмбеддингов — `embeddings.api_key` (`""` — удалить), в ответе только `has_key`/`key_hint`.
-   Границы (веб проверяет сам, сервер — `422` с `errors`, `loc: ["body", "<поле>"]`): `run_timeout_s` 60–14400,
-   `request_timeout_s` 10–1800, `min_interval_s` 0–120, `max_attempts` 1–20, `batch_size` 1–50, `concurrency` 1–16.
-   `request_timeout_s`/`min_interval_s`/`max_attempts` → `ProviderConfig`, `batch_size`/`concurrency` → `ValidationOptions`.
-   `POST /runs` без `provider`/`model` берёт `default_provider`/`default_model`.
-4. **Тексты ошибок провайдера** (`Run.error`, `test.error`, `event: error` чата) веб разбирает сам: код HTTP, тип
-   исключения SDK и `error.message` из тела. Сырой текст можно оставлять — он показывается в «Подробностях».
+## Ожидается от бэкенда: расширенные параметры провайдера
+
+`ProviderConfig` в main получил `extra_body`, `extra_body_set_review` (и уже имел `max_output_tokens`), но API провайдеров
+их пока не принимает. Веб отправляет и показывает их так (моки отвечают так же):
+- `ProviderOut` += `extra_body: object|null`, `extra_body_set_review: object|null`, `max_output_tokens: int|null`;
+- `PUT /providers/{p}` принимает те же поля; `null` — сбросить (ядро возьмёт значение по умолчанию);
+- `POST /providers/{p}/test` можно не трогать: проверка подключения от этих полей не зависит.
+Веб проверяет на клиенте, что оба поля — JSON-объекты, а `max_output_tokens` — целое 1…1 000 000.

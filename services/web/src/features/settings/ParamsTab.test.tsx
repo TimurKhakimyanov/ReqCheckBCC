@@ -43,13 +43,22 @@ describe('AI parameters tab', () => {
     open()
     await screen.findByTestId('params-form')
     await user.selectOptions(screen.getByLabelText('Провайдер эмбеддингов'), 'gemini')
-    expect(screen.getByLabelText('Модель эмбеддингов')).toHaveValue('gemini-embedding-001')
+    // пустая модель = модель провайдера по умолчанию (как в бэкенде)
+    expect(screen.getByLabelText('Модель эмбеддингов')).toHaveValue('')
+    expect(screen.getByText('По умолчанию: gemini-embedding-001')).toBeInTheDocument()
     expect(screen.getByRole('note')).toHaveTextContent('переиндексированы')
     await user.type(screen.getByLabelText(/Ключ для эмбеддингов/), 'AIza-embed-9876')
+    await user.type(screen.getByLabelText('Размерность векторов'), '1536')
     await user.click(screen.getByRole('button', { name: 'Сохранить' }))
-    await waitFor(() => expect(db.settings.embeddings.has_key).toBe(true))
+    await waitFor(() => expect(db.settings.embeddings_has_key).toBe(true))
     const s = await api.settings()
-    expect(s.embeddings).toEqual({ provider: 'gemini', model: 'gemini-embedding-001', has_key: true, key_hint: '…9876' })
+    expect(s).toMatchObject({
+      embeddings_provider: 'gemini',
+      embeddings_model: null,
+      embeddings_dim: 1536,
+      embeddings_has_key: true,
+      embeddings_key_hint: '…9876',
+    })
     expect(JSON.stringify(s)).not.toContain('AIza-embed-9876')
   })
 

@@ -522,7 +522,7 @@
     },
     "timeout": {
       "title": "The model did not answer in time",
-      "hint": "Local and reasoning models are slow. Increase the request timeout in AI parameters or reduce the batch size."
+      "hint": "Local and reasoning models are slow. Increase the run timeout in AI parameters or reduce the batch size."
     },
     "connection": {
       "title": "Cannot reach the provider",
@@ -557,7 +557,6 @@
     "defaults": "Defaults",
     "defaultsHint": "Used for new runs and chat when nothing else is chosen.",
     "defaultProvider": "Default provider",
-    "autoProvider": "Automatic — first configured",
     "defaultModel": "Default model",
     "pacing": "Call speed and reliability",
     "pacingHint": "Tune to the provider plan: free keys are rate-limited, local models are slow.",
@@ -568,7 +567,7 @@
       "paid_api": "Paid API",
       "paid_apiHint": "No pause, 4 workers, batches of 8 — fast",
       "local": "Local model",
-      "localHint": "1 worker, batches of 3, 600 s timeout — for a single GPU"
+      "localHint": "1 worker, batches of 3, 4 attempts, 1 h run timeout — for a single GPU"
     },
     "resetTo": "Reset to default: {{value}}",
     "revert": "Discard changes",
@@ -592,15 +591,10 @@
       "unit": "",
       "hint": "Bigger — fewer and cheaper calls, but weak models break JSON more often. On format or context errors drop to 3–4."
     },
-    "request_timeout_s": {
-      "label": "Request timeout",
-      "unit": "s",
-      "hint": "How long to wait for one model answer. Local and reasoning models — 300–600 s."
-    },
     "run_timeout_s": {
       "label": "Whole run timeout",
       "unit": "s",
-      "hint": "Runs longer than this stop with an error. Large documents on a slow model — 3600 s."
+      "hint": "Runs longer than this stop with an error. Local and reasoning models, large documents — 3600 s or more (up to 6 h)."
     },
     "embeddings": "Embeddings (search and knowledge base)",
     "embeddingsHint": "The model that turns text into vectors for semantic search over runs and the knowledge base.",
@@ -616,6 +610,21 @@
       "openaiHint": "Paid, texts are sent to OpenAI."
     },
     "reindexWarning": "After changing the embeddings model the knowledge base and run history are re-indexed — search may be incomplete for a few minutes.",
-    "range": "Allowed {{min}} to {{max}}"
+    "range": "Allowed {{min}} to {{max}}",
+    "max_upload_mb": {
+      "label": "Upload size limit",
+      "unit": "MB",
+      "hint": "Maximum size of a document or knowledge-base file. Scanned PDFs can be heavy — 50–100 MB."
+    },
+    "session_ttl_hours": {
+      "label": "Session lifetime",
+      "unit": "h",
+      "hint": "Hours until the user has to sign in again. For a shared computer — 1–2 h."
+    },
+    "other": "Other",
+    "embDim": "Vector dimensions",
+    "embDimHint": "Gemini only. 768 balances quality and index size.",
+    "embModelDefault": "Default: {{model}}",
+    "embModelBuiltin": "Default: the embeddings service built-in model"
   }
 }

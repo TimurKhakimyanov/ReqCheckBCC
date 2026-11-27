@@ -1,8 +1,8 @@
 // MSW-обработчики для всех методов docs/api.md. Включаются VITE_USE_MOCKS=true (браузер) и в тестах (node).
 import { delay, http, HttpResponse, type JsonBodyType, type PathParams } from 'msw'
 import { formatSSE } from '@/api/sse'
-import type { AppSettingsUpdate, DocumentFormat, ExportFormat, FindingReview, NumericSetting, ProviderId, ReviewStatus, RunCreate } from '@/api/types'
-import { EMBEDDINGS_PROVIDERS, isProviderConfigured, isTerminal, PROVIDERS, SETTING_LIMITS } from '@/api/types'
+import type { AppSettingsUpdate, DocumentFormat, ExportFormat, FindingReview, ProviderId, ReviewStatus, RunCreate } from '@/api/types'
+import { EMBEDDINGS_DIM_LIMITS, EMBEDDINGS_PROVIDERS, isProviderConfigured, isTerminal, PROVIDERS, SETTING_LIMITS } from '@/api/types'
 import {
   probeProvider,
   chatAnswer,
@@ -18,7 +18,6 @@ import {
 } from './data'
 
 const A = (p: string) => `*/api${p}`
-const MAX_UPLOAD_MB = 25
 
 /** Content-Disposition как у бэкенда: ASCII-запасное имя + filename* в UTF-8 (кириллица). */
 function contentDisposition(name: string) {
@@ -197,37 +196,40 @@ export const handlers = [
   http.put(
     A('/settings'),
     guard(async ({ request }) => {
+      // как app_settings.update_settings бэкенда: частичное обновление, плоские поля
       const body = (await request.json()) as AppSettingsUpdate
       const errors: { loc: (string | number)[]; msg: string; type: string }[] = []
-      for (const [k, lim] of Object.entries(SETTING_LIMITS) as [NumericSetting, (typeof SETTING_LIMITS)[NumericSetting]][]) {
-        const v = body[k]
-        if (v === undefined) continue
+      const ranges: Record<string, { min: number; max: number }> = { ...SETTING_LIMITS, embeddings_dim: EMBEDDINGS_DIM_LIMITS }
+      for (const [k, lim] of Object.entries(ranges)) {
+        const v = (body as Record<string, unknown>)[k]
+        if (v === undefined || v === null) continue
         if (typeof v !== 'number' || Number.isNaN(v) || v < lim.min || v > lim.max)
           errors.push({ loc: ['body', k], msg: `Input should be between ${lim.min} and ${lim.max}`, type: 'range' })
       }
       if (body.default_provider && !PROVIDERS.includes(body.default_provider))
         errors.push({ loc: ['body', 'default_provider'], msg: 'Unknown provider', type: 'enum' })
-      if (body.embeddings?.provider && !EMBEDDINGS_PROVIDERS.includes(body.embeddings.provider))
-        errors.push({ loc: ['body', 'embeddings', 'provider'], msg: 'Unknown embeddings provider', type: 'enum' })
+      if (body.embeddings_provider && !EMBEDDINGS_PROVIDERS.includes(body.embeddings_provider))
+        errors.push({ loc: ['body', 'embeddings_provider'], msg: 'Unknown embeddings provider', type: 'enum' })
       if (errors.length)
         return HttpResponse.json(
           { detail: `Некорректные данные: ${errors[0].loc.slice(1).join('.')}: ${errors[0].msg}`, code: 'validation_error', errors },
           { status: 422 },
         )
       const st = db.settings
-      const { embeddings, ...rest } = body
-      Object.assign(st, rest)
-      if (embeddings) {
-        if (embeddings.provider) st.embeddings.provider = embeddings.provider
-        if (embeddings.model !== undefined) st.embeddings.model = embeddings.model
-        if (embeddings.api_key !== undefined) {
-          st._embeddingsKey = embeddings.api_key || undefined
-          st.embeddings.has_key = !!embeddings.api_key
-          st.embeddings.key_hint = embeddings.api_key ? `…${embeddings.api_key.slice(-4)}` : null
-        }
+      const { embeddings_api_key: key, ...changes } = body
+      for (const [k, v] of Object.entries(changes)) {
+        const nullable = ['default_model', 'embeddings_model', 'embeddings_dim'].includes(k)
+        if (v === undefined || (v === null && !nullable)) continue
+        ;(st as unknown as Record<string, unknown>)[k] = nullable && v === '' ? null : v
+      }
+      if (key !== undefined) {
+        const k = key.trim()
+        st._embeddingsKey = k || undefined
+        st.embeddings_has_key = !!k
+        st.embeddings_key_hint = k ? `…${k.slice(-4)}` : null
       }
       st.updated_at = new Date().toISOString()
-      logAudit('settings.update', 'settings', { fields: Object.keys(body) })
+      logAudit('settings_updated', null, { fields: Object.keys(body).sort() })
       return HttpResponse.json(strip(st) as unknown as JsonBodyType)
     }),
   ),
@@ -255,7 +257,7 @@ export const handlers = [
       const ext = file.name.split('.').pop()?.toLowerCase() as DocumentFormat
       if (!['pdf', 'docx', 'md', 'txt'].includes(ext))
         return err(415, 'Формат не поддерживается: нужен PDF, DOCX, MD или TXT', 'unsupported_format')
-      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return err(413, `Файл больше ${MAX_UPLOAD_MB} МБ`, 'file_too_large')
+      if (file.size > db.settings.max_upload_mb * 1024 * 1024) return err(413, `Файл больше ${db.settings.max_upload_mb} МБ`, 'file_too_large')
       if (file.size === 0) return err(400, 'Файл пустой', 'empty_file')
       const doc = {
         id: uid('doc'),
@@ -606,7 +608,7 @@ export const handlers = [
       status: 'degraded',
       version: 'mock',
       checks: { postgres: 'ok', redis: 'ok', qdrant: 'ok', s3: 'ok', embedder: 'error: демо-режим, эмбеддер не запущен' },
-      limits: { max_upload_mb: MAX_UPLOAD_MB },
+      limits: { max_upload_mb: db.settings.max_upload_mb },
     }),
   ),
   http.get(
