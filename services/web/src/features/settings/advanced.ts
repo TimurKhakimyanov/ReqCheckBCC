@@ -27,9 +27,14 @@ export const formatJson = (v: JsonObject | null | undefined) => (v ? JSON.string
 
 export const MAX_OUTPUT_TOKENS_LIMIT = 1_000_000
 
+/** Таймаут одного запроса к модели, с: по умолчанию и границы */
+export const TIMEOUT_DEFAULT_S = 180
+export const TIMEOUT_LIMITS = { min: 10, max: 3600 }
+
 /** vLLM (Qwen3 и др.): без рассуждений на обычных вызовах, с рассуждениями — на поиске противоречий в наборе. */
 export const VLLM_THINKING_PRESET = {
   extra_body: { chat_template_kwargs: { enable_thinking: false } },
   extra_body_set_review: { chat_template_kwargs: { enable_thinking: true } },
   max_output_tokens: 48000,
+  timeout_s: 900,
 } as const

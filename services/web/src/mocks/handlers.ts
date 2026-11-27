@@ -159,8 +159,12 @@ export const handlers = [
       const mot = body.max_output_tokens
       if (mot !== undefined && mot !== null && (!Number.isInteger(mot) || mot < 1))
         errors.push({ loc: ['body', 'max_output_tokens'], msg: 'Input should be a positive integer', type: 'int_type' })
+      const to = body.timeout_s
+      if (to !== undefined && to !== null && (!Number.isInteger(to) || to < 10 || to > 3600))
+        errors.push({ loc: ['body', 'timeout_s'], msg: 'Input should be between 10 and 3600', type: 'range' })
       if (errors.length)
         return HttpResponse.json({ detail: `Некорректные данные: ${errors[0].loc[1]}: ${errors[0].msg}`, code: 'validation_error', errors }, { status: 422 })
+      if (body.timeout_s !== undefined) p.timeout_s = body.timeout_s
       if (body.extra_body !== undefined) p.extra_body = body.extra_body
       if (body.extra_body_set_review !== undefined) p.extra_body_set_review = body.extra_body_set_review
       if (body.max_output_tokens !== undefined) p.max_output_tokens = body.max_output_tokens

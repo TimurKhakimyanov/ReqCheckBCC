@@ -381,12 +381,15 @@
       "maxTokens": "Max output tokens",
       "maxTokensHint": "Empty — the agent picks a safe value. Reasoning models need more: reasoning also spends tokens.",
       "presetVllm": "vLLM: no reasoning, reasoning for the set review",
-      "presetVllmHint": "enable_thinking=false for regular calls, true for the contradiction search; up to 48,000 output tokens",
+      "presetVllmHint": "enable_thinking=false for regular calls, true for the contradiction search; up to 48,000 output tokens, 900 s timeout",
       "clear": "Clear",
       "jsonInvalid": "Not valid JSON: {{detail}}",
       "jsonNotObject": "A JSON object in curly braces { … } is required",
       "tokensRange": "A whole number from 1 to {{max}}",
-      "set": "set"
+      "set": "set",
+      "timeout": "Request timeout, s",
+      "timeoutHint": "How long to wait for one model answer. Empty — {{value}} s. Reasoning models — 600–900 s.",
+      "timeoutRange": "A whole number from {{min}} to {{max}}"
     }
   },
   "usage": {

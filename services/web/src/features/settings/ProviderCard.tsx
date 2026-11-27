@@ -22,14 +22,17 @@ export const PROBE_DEBOUNCE_MS = 700
  * Проверка провайдера по ещё не сохранённым полям формы. Запускается сама через PROBE_DEBOUNCE_MS после ввода
  * ключа (или адреса локальной модели) и по кнопке «Проверить». Устаревшие запросы отменяются.
  */
-export function useProviderProbe(p: ProviderSettings, apiKey: string, baseUrl: string) {
+export function useProviderProbe(p: ProviderSettings, apiKey: string, baseUrl: string, extras: ProviderTestRequest = {}) {
   const [result, setResult] = useState<ProviderTestResult | null>(null)
   const [pending, setPending] = useState(false)
   const ctrl = useRef<AbortController | null>(null)
   const compat = p.provider === 'openai_compatible'
+  // доп. параметры (extra_body, timeout_s) едут в проверку, но сами её не перезапускают
+  const extrasRef = useRef(extras)
+  extrasRef.current = extras
 
   const body = useCallback((): ProviderTestRequest => {
-    const b: ProviderTestRequest = {}
+    const b: ProviderTestRequest = { ...extrasRef.current }
     if (apiKey.trim()) b.api_key = apiKey.trim()
     if (compat) b.base_url = baseUrl.trim()
     return b
@@ -75,11 +78,16 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
   const [baseUrl, setBaseUrl] = useState(p.base_url ?? '')
   const [enabled, setEnabled] = useState(p.enabled)
   const [model, setModel] = useState(p.default_model ?? '')
+  const saved = useModels(isProviderConfigured(p) ? p.provider : undefined)
   const [adv, setAdv] = useState<AdvancedDraft>(() => advancedFrom(p))
   const advanced = advancedToUpdate(adv)
   const advInvalid = Object.keys(advanced.errors).length > 0
-  const saved = useModels(isProviderConfigured(p) ? p.provider : undefined)
-  const probe = useProviderProbe(p, apiKey, baseUrl)
+  const probe = useProviderProbe(
+    p,
+    apiKey,
+    baseUrl,
+    advInvalid ? {} : { extra_body: advanced.update.extra_body, timeout_s: advanced.update.timeout_s },
+  )
 
   // живой список из проверки важнее сохранённого
   const live = probe.result?.ok ? (probe.result.models ?? []) : []
@@ -198,7 +206,7 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
             id={`adv-${p.provider}`}
             draft={adv}
             onChange={setAdv}
-            defaultOpen={p.extra_body != null || p.extra_body_set_review != null || p.max_output_tokens != null}
+            defaultOpen={p.extra_body != null || p.extra_body_set_review != null || p.max_output_tokens != null || p.timeout_s != null}
           />
           {probe.result &&
             (probe.result.ok ? (

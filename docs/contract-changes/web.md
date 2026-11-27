@@ -31,11 +31,12 @@
    ключ — `embeddings_api_key` в `PUT`. Таймаута одного запроса в настройках нет — веб его не показывает.
 4. Тексты ошибок провайдера веб разбирает сам (код HTTP, тип исключения, `error.message`); сырой текст — в «Подробностях».
 
-## Ожидается от бэкенда: расширенные параметры провайдера
+## Расширенные параметры провайдера
 
-`ProviderConfig` в main получил `extra_body`, `extra_body_set_review` (и уже имел `max_output_tokens`), но API провайдеров
-их пока не принимает. Веб отправляет и показывает их так (моки отвечают так же):
-- `ProviderOut` += `extra_body: object|null`, `extra_body_set_review: object|null`, `max_output_tokens: int|null`;
-- `PUT /providers/{p}` принимает те же поля; `null` — сбросить (ядро возьмёт значение по умолчанию);
-- `POST /providers/{p}/test` можно не трогать: проверка подключения от этих полей не зависит.
-Веб проверяет на клиенте, что оба поля — JSON-объекты, а `max_output_tokens` — целое 1…1 000 000.
+`extra_body`, `extra_body_set_review`, `max_output_tokens` — как в ветке бэкенда (51ec800): в `ProviderOut`, `PUT /providers/{p}`
+(`null` — сбросить) и `extra_body` в теле `POST /providers/{p}/test`. Веб проверяет на клиенте, что JSON — объект,
+а `max_output_tokens` — целое 1…1 000 000.
+
+**Ожидается: `timeout_s`** (таймаут одного запроса к модели, с) — в `ProviderOut`, `PUT /providers/{p}` и теле
+`POST /providers/{p}/test`; `null` — значение по умолчанию 180. Веб проверяет целое 10…3600; пресет vLLM ставит 900.
+Проверка подключения отправляет несохранённые `extra_body` и `timeout_s` из формы.

@@ -69,6 +69,8 @@ export interface ProviderSettings {
   extra_body_set_review?: Record<string, unknown> | null
   /** Лимит токенов ответа; null — ядро выбирает с запасом */
   max_output_tokens?: number | null
+  /** Таймаут одного запроса к модели, с; null — 180 */
+  timeout_s?: number | null
 }
 
 export interface ProviderUpdate {
@@ -79,6 +81,7 @@ export interface ProviderUpdate {
   extra_body?: Record<string, unknown> | null
   extra_body_set_review?: Record<string, unknown> | null
   max_output_tokens?: number | null
+  timeout_s?: number | null
 }
 
 export interface ProviderTestResult {
@@ -93,6 +96,8 @@ export interface ProviderTestResult {
 export interface ProviderTestRequest {
   api_key?: string
   base_url?: string
+  extra_body?: Record<string, unknown> | null
+  timeout_s?: number | null
 }
 
 /** Провайдер готов к прогонам: ключ задан, а для локальной модели достаточно адреса. */
