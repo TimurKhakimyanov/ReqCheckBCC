@@ -281,8 +281,10 @@ docker compose --profile mock up -d --build web-mock   # http://localhost:8081, 
 
 - **Языки**: файл на язык в `services/web/src/locales/` (`ru.json`, `en.json`, черновик `kk.json`). Новый язык — новый файл,
   он появится в переключателе сам. Недостающие казахские строки показываются по-русски.
-- **Тема и стиль**: все цвета, радиусы и шрифты — CSS-переменные в `services/web/src/index.css` (светлая и тёмная).
-  Перекраска под фирменный стиль — правка токенов, компоненты не трогаются.
+- **Тема и стиль**: все цвета, радиусы, тени и шрифты — CSS-переменные в `services/web/src/index.css` (светлая и тёмная).
+  Визуальный язык: тёплый акцент `--primary` на почти белом/почти чёрном фоне, тонкие границы, многослойные мягкие тени
+  (`shadow-card`, `shadow-raised`, `shadow-primary`), моноширинные метки `.label-mono`, фон-сетка `.bg-grid`.
+  Шрифты Geist и Geist Mono (OFL) встроены в сборку — работают без интернета. Перекраска — правка токенов, компоненты не трогаются.
 - **Типы отчёта** генерируются из JSON Schema контракта и лежат в git (`src/api/report.gen.ts`); тест падает, если они устарели.
   Перегенерировать после изменения контракта (в контейнере, на хосте ничего не ставится):
   `docker run --rm -v "$PWD:/repo" -w /repo/services/web node:22-alpine sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm gen:types && rm -rf node_modules"`.
