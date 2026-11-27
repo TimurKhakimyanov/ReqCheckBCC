@@ -167,7 +167,7 @@ async def _progress_stream(request: Request, run_uuid: uuid.UUID) -> AsyncIterat
     channel = run_events_channel(str(run_uuid))
     client = aioredis.from_url(get_settings().redis_url, decode_responses=True)
     pubsub = client.pubsub()
-    SSE_CONNECTIONS.labels(kind="progress").inc()
+    SSE_CONNECTIONS.labels(stream="run_events").inc()
     try:
         await pubsub.subscribe(channel)  # подписка до чтения состояния — событие между ними не потеряется
         state = await run_in_threadpool(_state_event, run_uuid)
@@ -203,7 +203,7 @@ async def _progress_stream(request: Request, run_uuid: uuid.UUID) -> AsyncIterat
             else:
                 await asyncio.sleep(0)
     finally:
-        SSE_CONNECTIONS.labels(kind="progress").dec()
+        SSE_CONNECTIONS.labels(stream="run_events").dec()
         try:
             await pubsub.unsubscribe(channel)
             await pubsub.aclose()

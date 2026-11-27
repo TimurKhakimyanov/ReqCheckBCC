@@ -43,7 +43,8 @@ async def health(svc: Svc) -> HealthOut:
     )
     checks = dict(results)
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
-    return HealthOut(status=status, version=get_settings().agent_version, checks=checks)
+    s = get_settings()
+    return HealthOut(status=status, version=s.agent_version, checks=checks, limits={"max_upload_mb": s.max_upload_mb})
 
 
 def _add(row: UsageRow, usage: dict | None) -> None:

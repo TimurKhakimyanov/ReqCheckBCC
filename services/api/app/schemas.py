@@ -5,10 +5,22 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
-from req_contracts import Finding, ProviderName, RunStage, Summary, Usage, ValidationOptions
+from pydantic import BaseModel, Field, field_validator
+from req_contracts import Finding, ProviderName, RunStage, Severity, Summary, Usage, ValidationOptions
 
 ReviewStatus = Literal["open", "accepted", "false_positive", "fixed"]
+
+
+class RunSummary(Summary):
+    """Report.summary + Report.conclusion.ready_for_development (для списков прогонов и документов)."""
+
+    ready_for_development: bool | None = None
+    ready_for_testing: bool | None = None
+
+    @field_validator("by_severity")
+    @classmethod
+    def _all_severities(cls, v: dict[Severity, int]) -> dict[Severity, int]:
+        return {s: int(v.get(s, 0)) for s in Severity}
 
 
 class ErrorOut(BaseModel):
@@ -75,7 +87,7 @@ class RunShort(BaseModel):
     progress: float
     created_at: datetime
     finished_at: datetime | None = None
-    summary: Summary | None = None
+    summary: RunSummary | None = None
 
 
 class DocumentOut(BaseModel):
@@ -117,7 +129,7 @@ class RunOut(BaseModel):
     finished_at: datetime | None = None
     error: str | None = None
     usage: Usage | None = None
-    summary: Summary | None = None
+    summary: RunSummary | None = None
 
 
 class RunList(BaseModel):
@@ -187,6 +199,7 @@ class HealthOut(BaseModel):
     status: Literal["ok", "degraded"]
     version: str
     checks: dict[str, str]
+    limits: dict[str, int] = Field(default_factory=dict, description="Ограничения для клиента: max_upload_mb")
 
 
 class UsageRow(BaseModel):

@@ -19,12 +19,22 @@ from app.db import SessionLocal
 from app.indexing import index_report
 from app.models import Document, ReportRow, Run
 from app.providers import ProviderNotConfigured, build_provider_config
+from app.serialize import summary_from_report
 from app.services import TASK_RUN_VALIDATION, Services, get_services, run_cancel_key, run_events_channel
 from app.vectors import KNOWLEDGE
 from req_contracts import ProgressEvent, Report, RunStage, ValidationOptions
 
 from .celery_app import celery
-from .metrics import FINDINGS, LLM_CALLS, LLM_COST, LLM_TOKENS, RUN_DURATION, RUNS_FINISHED, RUNS_IN_PROGRESS
+from .metrics import (
+    FINDINGS,
+    LLM_COST,
+    LLM_REQUESTS,
+    LLM_TOKENS,
+    RUN_DURATION,
+    RUNS_FINISHED,
+    RUNS_IN_PROGRESS,
+    STAGE_DURATION,
+)
 
 log = logging.getLogger("worker.tasks")
 
@@ -66,6 +76,18 @@ class Progress:
         self._last_stage: str | None = None
         self._last_progress = 0.0
         self._lock = threading.Lock()
+        self._stage: str | None = None
+        self._stage_started = time.monotonic()
+
+    def _track_stage(self, stage: str) -> None:
+        if stage != self._stage:
+            self.close_stage()
+            self._stage, self._stage_started = stage, time.monotonic()
+
+    def close_stage(self) -> None:
+        if self._stage and self._stage not in TERMINAL:
+            STAGE_DURATION.labels(self._stage).observe(time.monotonic() - self._stage_started)
+        self._stage = None
 
     def cancelled(self) -> bool:
         try:
@@ -80,6 +102,7 @@ class Progress:
             self._last_progress = progress
             event = ProgressEvent(run_id=self.run_id, stage=stage, progress=round(progress, 4), message=message,
                                   current=current, total=total)
+            self._track_stage(stage.value)
             now = time.monotonic()
             write = force_db or stage.value != self._last_stage or now - self._last_db_write > 1.0
             if stage.value not in TERMINAL and write:
@@ -187,9 +210,9 @@ def _finish(run_id: uuid.UUID, status: RunStage, *, error: str | None = None, me
 
 def _record_usage_metrics(provider: str, model: str, report: Report) -> None:
     u = report.usage
-    LLM_CALLS.labels(provider, model).inc(u.llm_calls)
-    LLM_TOKENS.labels(provider, model, "prompt").inc(u.prompt_tokens)
-    LLM_TOKENS.labels(provider, model, "completion").inc(u.completion_tokens)
+    LLM_REQUESTS.labels(provider, model, "ok").inc(u.llm_calls)
+    LLM_TOKENS.labels(provider, model, "input").inc(u.prompt_tokens)
+    LLM_TOKENS.labels(provider, model, "output").inc(u.completion_tokens)
     if u.cost_usd:
         LLM_COST.labels(provider, model).inc(u.cost_usd)
     for f in report.findings:
@@ -266,7 +289,7 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
                 raise RunCancelled("run cancelled")
             db.merge(ReportRow(run_id=rid, data=report.model_dump(mode="json"), artifacts=artifacts))
             run.usage = report.usage.model_dump(mode="json")
-            run.summary = report.summary.model_dump(mode="json")
+            run.summary = summary_from_report(report)
             db.commit()
 
         progress.emit(RunStage.RENDERING, 0.97, "Индексация для поиска")
@@ -299,8 +322,9 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
         return status.value
     finally:
         RUNS_IN_PROGRESS.dec()
+        progress.close_stage()
         RUNS_FINISHED.labels(status.value, provider).inc()
-        RUN_DURATION.labels(status.value).observe(time.monotonic() - started)
+        RUN_DURATION.labels(status.value, provider).observe(time.monotonic() - started)
 
 
 @celery.task(name=TASK_RUN_VALIDATION, acks_late=True, ignore_result=True)

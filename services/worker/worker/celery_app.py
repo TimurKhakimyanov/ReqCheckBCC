@@ -9,7 +9,6 @@ from app.config import get_settings
 from app.logging_setup import setup_logging
 from app.services import make_celery
 from celery import signals
-from prometheus_client import start_http_server
 
 celery = make_celery("reqcheck-worker")
 celery.conf.update(
@@ -30,5 +29,7 @@ def _setup_logging(**_: object) -> None:
 @signals.worker_ready.connect
 def _worker_ready(**_: object) -> None:
     port = int(os.getenv("WORKER_METRICS_PORT", "9101"))
-    start_http_server(port)
+    from .metrics import start_metrics_server
+
+    start_metrics_server(port)
     log.info("worker ready", extra={"metrics_port": port, "concurrency": celery.conf.worker_concurrency})

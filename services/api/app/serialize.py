@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-from req_contracts import RunStage, Summary, Usage
+from req_contracts import Report, RunStage, Usage
 
 from .models import ChatMessageRow, Document, Run
-from .schemas import ChatMessageOut, DocumentOut, RunOut, RunShort
+from .schemas import ChatMessageOut, DocumentOut, RunOut, RunShort, RunSummary
 
 TERMINAL = {RunStage.DONE.value, RunStage.FAILED.value, RunStage.CANCELLED.value}
 
 
-def _summary(run: Run) -> Summary | None:
-    return Summary.model_validate(run.summary) if run.summary else None
+def summary_from_report(report: Report) -> dict:
+    """То, что хранится в runs.summary: сводка отчёта + итог готовности."""
+    return RunSummary(**report.summary.model_dump(), ready_for_development=report.conclusion.ready_for_development,
+                      ready_for_testing=report.conclusion.ready_for_testing).model_dump(mode="json")
+
+
+def _summary(run: Run) -> RunSummary | None:
+    return RunSummary.model_validate(run.summary) if run.summary else None
 
 
 def run_out(run: Run, document_name: str | None = None) -> RunOut:

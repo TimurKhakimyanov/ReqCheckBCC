@@ -13,6 +13,7 @@ from app.db import SessionLocal
 from app.indexing import index_report
 from app.knowledge import ensure_builtin
 from app.models import ReportRow, Run
+from app.serialize import summary_from_report
 from app.services import run_cancel_key, run_events_channel
 from req_contracts import ProgressEvent, Report, RunStage
 
@@ -41,6 +42,7 @@ async def test_health_and_auth(anon):
     body = r.json()
     assert body["checks"]["postgres"] == "ok" and body["checks"]["redis"] == "ok"
     assert body["checks"]["qdrant"] == "ok" and body["checks"]["embedder"] == "ok"
+    assert body["limits"] == {"max_upload_mb": 25}
 
     r = await anon.get("/api/documents")
     assert r.status_code == 401 and r.json()["code"] == "unauthorized"
@@ -122,7 +124,7 @@ def _finish_run_like_worker(services, run_id: str, doc_id: str) -> None:
         run.finished_at = datetime.now(timezone.utc)
         run.usage = {"llm_calls": 12, "prompt_tokens": 1000, "completion_tokens": 500, "cost_usd": 0.01,
                      "duration_s": 42.0}
-        run.summary = report.summary.model_dump(mode="json")
+        run.summary = summary_from_report(report)
         db.commit()
     index_report(services.vectors, run_id, doc_id, "requirements.md", report)
 
@@ -155,6 +157,8 @@ async def test_report_and_exports(client):
     run = r.json()
     assert run["status"] == "done" and run["summary"]["findings_total"] == SAMPLE["summary"]["findings_total"]
     assert run["usage"]["llm_calls"] == 12
+    assert run["summary"]["ready_for_development"] == SAMPLE["conclusion"]["ready_for_development"]
+    assert set(run["summary"]["by_severity"]) == {"critical", "major", "minor"}
 
     r = await client.get(f"/api/runs/{run_id}/report")
     assert r.status_code == 200 and r.json()["passport"] == SAMPLE["passport"]
@@ -167,6 +171,7 @@ async def test_report_and_exports(client):
 
     r = await client.get("/api/documents/" + state["doc"]["id"])
     assert r.json()["runs_count"] == 1 and r.json()["last_run"]["status"] == "done"
+    assert "ready_for_development" in r.json()["last_run"]["summary"]
 
 
 async def test_findings_review(client):
@@ -226,6 +231,8 @@ async def test_knowledge(client, services):
     assert items[manual_id]["status"] == "ready" and items[manual_id]["source"] == "manual"
     assert items[r.json()["id"]]["source"] == "upload"
     assert (await client.delete(f"/api/knowledge/{manual_id}")).status_code == 204
+    r = await client.delete(f"/api/knowledge/{builtin[0]['id']}")
+    assert r.status_code == 409 and r.json()["code"] == "builtin_protected"
     assert (await client.post("/api/knowledge", json={"title": "x"})).status_code == 422
 
 
@@ -281,7 +288,12 @@ async def test_openapi_and_metrics(anon):
                  "/api/runs/{run_id}/chat", "/api/search", "/api/knowledge", "/api/usage", "/api/audit"):
         assert path in spec["paths"], path
     r = await anon.get("/metrics")
-    assert r.status_code == 200 and "reqcheck_http_requests_total" in r.text
+    assert r.status_code == 200
+    for name in ("reqcheck_http_requests_total", "reqcheck_http_request_duration_seconds", "reqcheck_sse_connections",
+                 "reqcheck_llm_requests_total"):
+        assert name in r.text, name
+    assert 'route="/api/health"' not in r.text
+    assert 'reqcheck_http_request_duration_seconds_count{method="GET",route="/api/runs/{run_id}/events"}' not in r.text
 
 
 async def test_logout(anon):

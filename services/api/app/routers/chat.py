@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 
@@ -16,7 +17,7 @@ from ..audit import audit
 from ..db import SessionLocal
 from ..deps import DB, CurrentUser, Svc
 from ..errors import ApiError
-from ..metrics import CHAT_MESSAGES, SSE_CONNECTIONS
+from ..metrics import LLM_LATENCY, LLM_REQUESTS, SSE_CONNECTIONS
 from ..models import ChatMessageRow
 from ..providers import ProviderNotConfigured, build_provider_config
 from ..schemas import ChatIn, ChatMessageOut, ErrorOut
@@ -66,8 +67,9 @@ def _save_message(run_id: uuid.UUID, role: str, content: str, cfg: ProviderConfi
 
 async def _chat_stream(request: Request, svc: Services, run_id: uuid.UUID, report: Report,
                        history: list[req_core.ChatMessage], question: str, cfg: ProviderConfig) -> AsyncIterator[str]:
-    SSE_CONNECTIONS.labels(kind="chat").inc()
+    SSE_CONNECTIONS.labels(stream="chat").inc()
     parts: list[str] = []
+    started = time.perf_counter()
     try:
         snippets = await run_in_threadpool(knowledge_snippets, svc, question)
         tokens = req_core.answer_question(report, history, question, cfg, knowledge_snippets=snippets or None)
@@ -80,18 +82,19 @@ async def _chat_stream(request: Request, svc: Services, run_id: uuid.UUID, repor
                 break
         answer = "".join(parts).strip() or "(пустой ответ модели)"
         row = await run_in_threadpool(_save_message, run_id, "assistant", answer, cfg)
-        CHAT_MESSAGES.labels(provider=cfg.provider.value, result="ok").inc()
+        LLM_REQUESTS.labels(cfg.provider.value, cfg.model, "ok").inc()
+        LLM_LATENCY.labels(cfg.provider.value, cfg.model).observe(time.perf_counter() - started)
         yield sse("done", chat_out(row).model_dump_json())
     except Exception as e:  # noqa: BLE001
         log.exception("chat failed")
-        CHAT_MESSAGES.labels(provider=cfg.provider.value, result="error").inc()
+        LLM_REQUESTS.labels(cfg.provider.value, cfg.model, "error").inc()
         detail = "Чат пока недоступен: ядро агента не реализовано" if isinstance(e, NotImplementedError) \
             else f"Ошибка модели: {type(e).__name__}: {e}"[:500]
         if parts:  # сохраняем то, что успели получить
             await run_in_threadpool(_save_message, run_id, "assistant", "".join(parts), cfg)
         yield sse("error", json.dumps({"detail": detail, "code": "chat_failed"}, ensure_ascii=False))
     finally:
-        SSE_CONNECTIONS.labels(kind="chat").dec()
+        SSE_CONNECTIONS.labels(stream="chat").dec()
 
 
 @router.post("", responses={200: {"content": {"text/event-stream": {}},

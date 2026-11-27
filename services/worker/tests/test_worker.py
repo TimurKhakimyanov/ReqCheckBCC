@@ -99,6 +99,7 @@ def test_successful_run(svc, monkeypatch):
     run = get_run(run_id)
     assert run.status == "done" and run.progress == 1.0 and run.error is None and run.finished_at
     assert run.summary["findings_total"] == SAMPLE.summary.findings_total
+    assert run.summary["ready_for_development"] == SAMPLE.conclusion.ready_for_development
     with SessionLocal() as db:
         row = db.get(ReportRow, uuid.UUID(run_id))
         assert Report.model_validate(row.data) == SAMPLE
@@ -212,3 +213,14 @@ def test_export_failure_is_not_fatal(svc, monkeypatch):
 def test_describe_error():
     assert "429" in describe_error(Exception("429 RESOURCE_EXHAUSTED"), 10)
     assert describe_error(ValueError("x"), 10) == "ValueError: x"
+
+
+def test_metrics_names():
+    from prometheus_client import REGISTRY, generate_latest
+
+    text = generate_latest(REGISTRY).decode()
+    for name in ("reqcheck_runs_total", "reqcheck_run_duration_seconds", "reqcheck_run_stage_duration_seconds",
+                 "reqcheck_runs_in_progress", "reqcheck_findings_total", "reqcheck_llm_requests_total",
+                 "reqcheck_llm_tokens_total"):
+        assert name in text, name
+    assert 'type="input"' in text and 'status="done"' in text

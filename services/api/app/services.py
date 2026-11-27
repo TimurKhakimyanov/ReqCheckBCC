@@ -15,7 +15,8 @@ from .storage import ObjectStore, S3ObjectStore
 from .vectors import VectorStore
 
 TASK_RUN_VALIDATION = "reqcheck.run_validation"
-CELERY_QUEUE = "reqcheck"
+# Имя по умолчанию: redis-exporter считает длину очереди по ключу `celery` в db0 (docs/monitoring.md)
+CELERY_QUEUE = "celery"
 
 
 def make_celery(name: str = "reqcheck") -> Celery:

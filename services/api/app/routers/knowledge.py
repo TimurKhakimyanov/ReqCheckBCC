@@ -103,6 +103,8 @@ def delete_knowledge(item_id: str, request: Request, user: CurrentUser, db: DB, 
     item = db.get(KnowledgeItem, parse_uuid(item_id, "Элемент базы знаний"))
     if item is None:
         raise not_found("Элемент базы знаний")
+    if item.source == "builtin":
+        raise ApiError(409, "builtin_protected", "Встроенный материал базы знаний удалить нельзя")
     db.delete(item)
     audit(db, user.username, "knowledge_deleted", str(item.id), {"title": item.title}, request, commit=False)
     db.commit()

@@ -8,6 +8,9 @@
 | Где | Что |
 | :--- | :--- |
 | `Run` | `status` и `stage` — оба `RunStage` и всегда совпадают (текущая стадия). Добавлено поле `message` (текст последнего события; для `failed` — то же, что `error`). |
+| `Run.summary`, `Document.last_run.summary` | `Report.summary` + `ready_for_development`, `ready_for_testing` (из `Report.conclusion`); в `by_severity` всегда все три ключа. |
+| `DELETE /knowledge/{id}` | Встроенный материал (`source: builtin`) — `409 builtin_protected`. |
+| Выгрузки и исходный файл | `Content-Disposition: attachment; filename="<ascii>"; filename*=UTF-8''<имя>`. |
 | `POST /runs` | `provider` и `model` необязательны: по умолчанию — провайдер из `LLM_PROVIDER` (если у него есть ключ, иначе первый с ключом) и его `default_model`. `400 provider_not_configured`, если ключа нет. |
 | `POST /documents`, `POST /knowledge` | Ответ `201`. Ошибки: `415 unsupported_format`, `413 file_too_large`, `400 empty_file`. |
 | `GET /providers/{p}/models` | Всегда `200 {models, error?}`: если провайдер недоступен или ядро не умеет `list_models`, возвращается список-подсказка и текст `error`. |
@@ -16,8 +19,8 @@
 | `POST /runs/{id}/chat` | Кроме `token` и `done` бывает `event: error` с `data: {detail, code}` — после него поток закрывается. Отчёт должен быть готов, иначе `404 report_not_ready`. |
 | SSE `/runs/{id}/events` | Перед первым событием — `retry: 3000`; каждые ~15 с комментарий `: keepalive`. |
 | `KnowledgeItem` | Добавлено `error?` (для `status: failed`). `POST /knowledge` принимает `multipart/form-data` (`file`, необязательный `title`) или JSON `{title, text}`. |
-| `GET /health` | Всегда `200`; `status: degraded`, если какая-то проверка не `ok` (в `checks` — текст ошибки). |
-| `GET /usage` | `from`/`to` — даты `YYYY-MM-DD` (UTC, включительно; по умолчанию последние 30 дней). Строки: `{runs, llm_calls, prompt_tokens, completion_tokens, cost_usd, duration_s}`; `by_provider` добавляет `provider, model`, `by_day` — `date`. Учитываются прогоны `done` и `failed`. |
+| `GET /health` | Всегда `200`; `status: degraded`, если какая-то проверка не `ok` (в `checks` — текст ошибки). Поле `limits: {max_upload_mb}`. |
+| `GET /usage` | `from`/`to` — даты `YYYY-MM-DD` (UTC, включительно; по умолчанию последние 30 дней). Строки: `{runs, llm_calls, prompt_tokens, completion_tokens, cost_usd, duration_s}`; `by_provider` добавляет `provider, model`, `by_day` — `date`. Учитываются прогоны `done` и `failed`. | Поле дня в `by_day` — `date` (веб подстраивается).
 | `422` | Помимо `detail` и `code: validation_error` есть массив `errors` (как в FastAPI). |
 | `GET /runs/{id}/report.{fmt}` | Если выгрузки нет в S3 (ядро не смогло отрисовать при прогоне), рисуется по запросу; `501 render_unavailable`, если ядро не поддерживает формат. |
 
@@ -28,10 +31,20 @@
 - `/metrics` и `/livez` живут в корне (не под `/api`) — через веб их не проксировать.
 
 ## Для сессии «Инфраструктура» (Prometheus)
-Цели: `api:8000/metrics`, `worker:9101/metrics`, `embedder:8001/metrics`. Основные метрики:
-`reqcheck_http_requests_total`, `reqcheck_http_request_duration_seconds`, `reqcheck_worker_runs_total{status}`,
-`reqcheck_worker_run_duration_seconds`, `reqcheck_worker_runs_in_progress`, `reqcheck_llm_tokens_total`,
-`reqcheck_llm_cost_usd_total`, `reqcheck_findings_total{severity}`, `reqcheck_embedder_texts_total`.
+Цели: `api:8000/metrics`, `worker:9101/metrics`, `embedder:8001/metrics`. Имена и метки — по `docs/monitoring.md` (ветка infra):
+- api: `reqcheck_http_requests_total{method,route,status}`, `reqcheck_http_request_duration_seconds{method,route}`
+  (без SSE; `/metrics`, `/livez`, `/api/health` не считаются), `reqcheck_sse_connections{stream=run_events|chat}`,
+  `reqcheck_llm_requests_total{provider,model,outcome}` и `reqcheck_llm_request_duration_seconds` для чата.
+  Дополнительно: `reqcheck_logins_total{result}`, `reqcheck_runs_created_total{provider}`, `reqcheck_documents_uploaded_total{format}`.
+- worker: `reqcheck_runs_total{status,provider}`, `reqcheck_run_duration_seconds{status,provider}`,
+  `reqcheck_run_stage_duration_seconds{stage}`, `reqcheck_runs_in_progress` (livesum), `reqcheck_findings_total{severity}`,
+  `reqcheck_llm_tokens_total{provider,model,type=input|output}`, `reqcheck_llm_requests_total{…,outcome="ok"}` (из `Report.usage.llm_calls`;
+  `error`/`retry` и `reqcheck_llm_request_duration_seconds` по каждому вызову видны только ядру — в бэклоге),
+  `reqcheck_llm_cost_usd_total`. Multiprocess-режим включается `PROMETHEUS_MULTIPROC_DIR` (каталог чистится при старте).
+- embedder: `reqcheck_embedder_texts_total{kind}`, `reqcheck_embedder_request_seconds`, `reqcheck_embedder_errors_total`.
+- Очередь Celery называется `celery` (db0) — `REDIS_EXPORTER_CHECK_SINGLE_KEYS=db0=celery` подходит.
+- Healthcheck api — `GET /livez` (живость процесса); `/api/health` — глубокая проверка зависимостей, всегда `200`.
+- api и worker ждут `qdrant` и `seaweedfs` в состоянии `service_healthy` — нужны healthcheck'и из ветки infra.
 - SeaweedFS: бакет `${S3_BUCKET}` создаётся api сам. Если в `deploy/seaweedfs/s3.json` появятся identities —
   ключи должны совпадать с `S3_ACCESS_KEY`/`S3_SECRET_KEY` и иметь права Admin (создание бакета) или бакет создаётся заранее.
 
