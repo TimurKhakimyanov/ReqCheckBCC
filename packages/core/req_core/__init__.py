@@ -1,8 +1,6 @@
 """Ядро агента ReqCheck — публичный интерфейс.
 
-ЗАГЛУШКА: сигнатуры зафиксированы (см. docs/architecture.md), реализация — сессия «Ядро».
-Воркер, API и CLI импортируют только то, что объявлено здесь. До готовности ядра в их тестах
-эти функции подменяются моками, возвращающими req_contracts/fixtures/sample_report.json.
+Сигнатуры зафиксированы (см. docs/architecture.md). Воркер, API и CLI импортируют только то, что объявлено здесь.
 """
 
 from __future__ import annotations
@@ -33,7 +31,9 @@ class LLMClient(Protocol):
 
 
 def parse_document(path: Path, *, name: str | None = None) -> ParsedDocument:
-    raise NotImplementedError
+    from .parsing import parse_document as _parse
+
+    return _parse(Path(path), name=name)
 
 
 def validate_document(
@@ -44,19 +44,34 @@ def validate_document(
     on_progress: ProgressCallback | None = None,
     document_name: str | None = None,
 ) -> Report:
-    raise NotImplementedError
+    from req_contracts import ProgressEvent, RunStage
+
+    from .pipeline import run_pipeline
+
+    if on_progress:
+        on_progress(ProgressEvent(stage=RunStage.PARSING, progress=0.01, message="Чтение документа"))
+    doc = parse_document(Path(path), name=document_name)
+    client = get_llm(llm)
+    return run_pipeline(doc, client, options=options, on_progress=on_progress,
+                        provider=llm.provider.value, model=getattr(client, "model", llm.model))
 
 
 def render_report(report: Report, fmt: ReportFormat) -> bytes:
-    raise NotImplementedError
+    from .render import render_report as _render
+
+    return _render(report, fmt)
 
 
 def get_llm(cfg: ProviderConfig) -> LLMClient:
-    raise NotImplementedError
+    from .llm import create_llm
+
+    return create_llm(cfg)
 
 
 def list_models(cfg: ProviderConfig) -> list[str]:
-    raise NotImplementedError
+    from .llm import list_provider_models
+
+    return list_provider_models(cfg)
 
 
 def answer_question(
@@ -66,7 +81,9 @@ def answer_question(
     llm: ProviderConfig,
     knowledge_snippets: list[str] | None = None,
 ) -> Iterator[str]:
-    raise NotImplementedError
+    from .chat import answer_stream
+
+    return answer_stream(get_llm(llm), report, history, question, knowledge_snippets)
 
 
 __all__ = [
