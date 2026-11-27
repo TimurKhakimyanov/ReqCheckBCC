@@ -119,8 +119,16 @@ def test_successful_run(svc, monkeypatch):
     assert len(hits) == len(SAMPLE.requirements) + len(SAMPLE.findings)
 
 
-def test_core_stub_gives_clear_error(svc):
-    """Настоящая заглушка ядра (NotImplementedError) → понятная ошибка, а не трейсбек."""
+def test_core_stub_gives_clear_error(svc, monkeypatch):
+    """Нереализованное ядро (NotImplementedError) → понятная ошибка, а не трейсбек.
+
+    Ядро подменяется явно: настоящее ядро пошло бы в сеть к провайдеру.
+    """
+
+    def not_implemented(*a, **k):
+        raise NotImplementedError
+
+    monkeypatch.setattr(req_core, "validate_document", not_implemented)
     run_id = make_run(svc)
     events = EventCollector(svc, run_id)
     assert run_validation.delay(run_id).get() == "failed"
