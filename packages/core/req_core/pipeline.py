@@ -604,7 +604,8 @@ class Pipeline:
         self.progress(RunStage.VERIFYING, 0.92, "Заполнение чек-листа ревью")
         res = self.ask(prompts.CHECKLIST_TASK.format(
             items="\n".join(f"{i}. {q}" for i, (q, _) in enumerate(items, 1)),
-            findings=self._findings_brief(findings), reqs=self.reqs_list(drafts)),
+            findings=self._findings_brief(findings), reqs=self.reqs_list(drafts),
+            doc=prompts.doc_block(self.text, self.s.context_chars)),
             ChecklistResult, "чек-лист")
         answers = {it.index: it for it in (res.items if res else [])}
         valid = {f.id for f in findings}

@@ -203,3 +203,10 @@ def test_long_model_title_is_split_without_losing_text():
     assert long in expl and expl.endswith("Короткое пояснение.")
     assert split_title("Коротко", "Пояснение") == ("Коротко", "Пояснение")
     assert split_title("", "Только пояснение") == ("Только пояснение", "Только пояснение")
+
+
+def test_checklist_prompt_sees_the_document(sample_path):
+    llm = FakeLLM()
+    run_pipeline(parse_document(sample_path), llm)
+    call = next(c for c in llm.calls if c.get("schema") == "ChecklistResult")
+    assert "<document>" in call["user"] and "Архитектура решения" in call["user"]
