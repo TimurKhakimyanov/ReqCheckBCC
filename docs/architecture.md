@@ -88,7 +88,7 @@ answer_question(report: Report, history: list[ChatMessage], question: str, llm: 
   повторы при 429/5xx.
 - Провайдеры — собственный тонкий слой над официальными SDK (`google-genai`, `openai`, `anthropic`);
   `openai_compatible` = OpenAI SDK с `base_url` (Ollama, vLLM). LiteLLM не используем (лишняя зависимость в банковском контуре).
-- `agent_version` — `git describe --always --dirty`, иначе переменная `AGENT_VERSION` (задаётся при сборке образа).
+- `agent_version` — `git describe --always --dirty`; в Docker — переменная `AGENT_VERSION`, а без неё коммит, вшитый при сборке образа из каталога `.git` (`python -m req_core.version`).
 
 ## Данные
 

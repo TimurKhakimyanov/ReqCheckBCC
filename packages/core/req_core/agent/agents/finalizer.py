@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from .. import guard, prompts
 from ..criteria import CRITICAL_TYPES, SEVERITY_ORDER
@@ -69,8 +70,30 @@ def stats(ctx: Ctx) -> dict:
             t: sum(1 for f in found if f.payload["severity"] == "critical" and f.payload["defect_type"] == t)
             for t in CRITICAL_TYPES
         },
-        "questions": len(ctx.graph.of("question")),
+        "questions_total": len(ctx.graph.of("question")),
+        "questions_blocking": sum(1 for q in ctx.graph.of("question") if q.payload.get("priority") == "blocker"),
     }
+
+
+_NUM = r"(\d+)"
+_COUNT_CHECKS = (
+    # (шаблон с числом, ключ статистики): число в тексте итога сверяется со статистикой и исправляется кодом
+    (re.compile(_NUM + r"(?=\s+блокирующ\w+\s+вопрос)"), "questions_blocking"),
+    (re.compile(_NUM + r"(?=\s+(?:уточняющ\w+\s+)?вопрос\w*\s+автору)"), "questions_total"),
+    (re.compile(_NUM + r"(?=\s+критич\w+\s+(?:замечан|дефект|нарушен))"), "critical"),
+    (re.compile(r"(?<=из\s)" + _NUM + r"(?=\s+требовани)"), "requirements"),
+)
+
+
+def fix_counts(text: str, st: dict) -> str:
+    """Модель иногда называет в итоге числа, которых нет в статистике («15 блокирующих вопросов» при 9).
+    Число перед известными словами сверяется со статистикой прогона: если оно больше фактического итога,
+    оно заменяется итогом. Меньшие числа не трогаем — это может быть законный частичный счёт."""
+    facts = {"questions_blocking": st["questions_blocking"], "questions_total": st["questions_total"],
+             "critical": st["by_severity"]["critical"], "requirements": st["requirements"]}
+    for rx, key in _COUNT_CHECKS:
+        text = rx.sub(lambda m, k=key: str(facts[k]) if int(m.group(1)) > facts[k] else m.group(1), text)
+    return text
 
 
 def verdict(ctx: Ctx) -> None:
@@ -123,9 +146,9 @@ def verdict(ctx: Ctx) -> None:
         ]
     ctx.meta["verdict"] = {
         "decision": decision,
-        "development": guard.scrub(ctx, s(data.get("development")), "итог: разработка"),
-        "testing": guard.scrub(ctx, s(data.get("testing")), "итог: тестирование"),
-        "rationale": guard.scrub(ctx, s(data.get("rationale")), "итог: обоснование"),
+        "development": fix_counts(guard.scrub(ctx, s(data.get("development")), "итог: разработка"), st),
+        "testing": fix_counts(guard.scrub(ctx, s(data.get("testing")), "итог: тестирование"), st),
+        "rationale": fix_counts(guard.scrub(ctx, s(data.get("rationale")), "итог: обоснование"), st),
         "top_fixes": fixes,
         "strengths": [guard.scrub(ctx, s(x), "итог: сильные стороны") for x in lst(data.get("strengths")) if s(x)][:4],
         "guard": guard_note,

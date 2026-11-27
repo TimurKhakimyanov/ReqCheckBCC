@@ -3,9 +3,12 @@
 Ступени:
   1) код: замечание без цитаты, найденной в документе, отклоняется ещё при записи (common.record_finding);
   2) модель-оппонент проверяет каждое замечание по тексту и выравнивает серьёзность;
-  3) слияние дублей в два прохода: по всему списку и отдельно по замечаниям об одном месте документа;
-     модель предлагает группы, код решает, что объединять и какое замечание оставить;
-  4) код: пересчёт вердиктов по подтверждённым замечаниям, финальная нумерация F-001…
+  3) слияние дублей: сначала код сливает явные повторы (то же место документа и та же формулировка), затем
+     модель в два прохода — по всему списку и отдельно по замечаниям об одном месте документа; модель предлагает
+     группы, код решает, что объединять и какое замечание оставить. Если модель не ответила, остаётся слияние
+     кодом, а в отчёт попадает предупреждение;
+  4) код: серьёзность слитого замечания — медиана оценок верификатора по всем его повторам; пересчёт вердиктов
+     по подтверждённым замечаниям, финальная нумерация D-001…
 """
 from __future__ import annotations
 
@@ -93,6 +96,8 @@ def _merge(ctx: Ctx, dup: Node, target: Node, reason: str) -> None:
     dup.state = "merged"
     dup.payload["verify"] = {"verdict": "duplicate", "duplicate_of": target.id, "reason": reason}
     dp, tp = dup.payload, target.payload
+    # оценки серьёзности всех повторов: итоговая считается по ним в _settle_severity
+    tp.setdefault("severity_votes", [tp["severity"]]).extend(dp.get("severity_votes") or [dp["severity"]])
     tp["also"].append({"id": dup.id, "source": dp["source"], "title": dp["title"]})
     tp["also"] += dp["also"]
     for rid in dp["req_ids"]:
@@ -104,8 +109,6 @@ def _merge(ctx: Ctx, dup: Node, target: Node, reason: str) -> None:
             tp["evidence"].append(ev)
     if not tp.get("question") and dp.get("question"):
         tp["question"], tp["addressee"] = dp["question"], dp["addressee"]
-    if SEVERITY_ORDER[dp["severity"]] < SEVERITY_ORDER[tp["severity"]]:
-        tp["severity"] = dp["severity"]
     # какие клетки матрицы «требование × критерий» закрывает слитое замечание
     covers = tp.setdefault("covers", [])
     if dp["level"] == "req":
@@ -124,7 +127,93 @@ def _row(n: Node) -> str:
     )
 
 
-def _ask_groups(ctx: Ctx, text: str, label: str) -> list[dict]:
+# ----------------------------------------------------------------------------- слияние кодом (без модели)
+_WORD = re.compile(r"[a-zа-яё0-9]{3,}")
+_STOP = frozenset(
+    "для при или это что как без над под нет его она они оно был быть есть если чтобы также так уже все или либо "
+    "между после перед когда где который которая которые которых может могут должен должна должно нужно надо один "
+    "одна одно этот эта эти того тот том тем чем про the and for not".split()
+)
+TITLE_SIM = 0.5       # доля общих слов в заголовках, с которой замечания об одном месте считаются повтором
+TEXT_SIM = 0.4        # то же для заголовка вместе с началом описания
+
+
+def _words(text: str) -> frozenset[str]:
+    return frozenset(w[:5] for w in _WORD.findall((text or "").lower().replace("ё", "е")) if w not in _STOP)
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    return len(a & b) / len(a | b) if a and b else 0.0
+
+
+def _obvious_duplicates(a: Node, b: Node) -> bool:
+    """Повтор, который виден без модели. Пороги подобраны так, чтобы не сливать разные дефекты одного места:
+    «статус 201 не описан» и «под статусом 200 пример с ERROR» остаются отдельными замечаниями."""
+    pa, pb = a.payload, b.payload
+    lines_a = {e["line_start"] for e in pa["evidence"]}
+    lines_b = {e["line_start"] for e in pb["evidence"]}
+    if pa["defect_type"] == pb["defect_type"] == "contradictory" and len(lines_a) >= 2 and lines_a == lines_b:
+        return True     # противоречие между одними и теми же двумя местами документа
+    if not _same_place(a, b):
+        return False
+    if _jaccard(_words(pa["title"]), _words(pb["title"])) >= TITLE_SIM:
+        return True
+    return _jaccard(_words(pa["title"] + " " + pa["problem"][:400]),
+                    _words(pb["title"] + " " + pb["problem"][:400])) >= TEXT_SIM
+
+
+def _code_groups(conf: list[Node]) -> list[dict]:
+    """Группы явных повторов: связные компоненты по _obvious_duplicates."""
+    parent = {n.id: n.id for n in conf}
+
+    def root(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i, a in enumerate(conf):
+        for b in conf[i + 1:]:
+            if root(a.id) != root(b.id) and _obvious_duplicates(a, b):
+                parent[root(b.id)] = root(a.id)
+    groups: dict[str, list[str]] = {}
+    for n in conf:
+        groups.setdefault(root(n.id), []).append(n.id)
+    return [{"ids": ids, "reason": "то же место документа и та же формулировка (слито правилом, без модели)"}
+            for ids in groups.values() if len(ids) >= 2]
+
+
+def _settle_severity(conf: list[Node]) -> None:
+    """Серьёзность слитого замечания — медиана оценок верификатора по всем повторам (при равенстве — строже).
+    Один и тот же дефект рецензенты оценивают по-разному; максимум завышал бы долю критичных."""
+    for n in conf:
+        votes = n.payload.pop("severity_votes", None)
+        if n.state != "confirmed" or not votes:
+            continue
+        ranks = sorted(SEVERITY_ORDER[v] for v in votes)
+        rank = ranks[(len(ranks) - 1) // 2]
+        n.payload["severity"] = next(k for k, v in SEVERITY_ORDER.items() if v == rank)
+
+
+def _normalize_criteria(ctx: Ctx, nodes: list[Node]) -> None:
+    """Критерий набора по типу дефекта. Рецензент относит замечание к «своему» критерию, из-за чего противоречие
+    попадало в «полноту», а пропуск — в «непротиворечивость»."""
+    for n in nodes:
+        p = n.payload
+        if p["level"] != "set":
+            continue
+        new = None
+        if p["defect_type"] == "contradictory" and p["criterion"] != "S2":
+            new = "S2"
+        elif p["defect_type"] == "incomplete" and p["criterion"] == "S2":
+            new = "S1"
+        if new:
+            ctx.graph.log({"kind": "criterion_normalized", "finding": n.id, "from": p["criterion"], "to": new})
+            p["criterion"] = new
+
+
+def _ask_groups(ctx: Ctx, text: str, label: str) -> list[dict] | None:
+    """Группы дублей от модели. None — модель не ответила (ошибка или пустой оборванный ответ)."""
     system, user = prompts.load("dedup").render(findings=text)
     try:
         # ответ короткий; жёсткий лимит не даёт модели «зациклиться» на повторении групп
@@ -136,15 +225,21 @@ def _ask_groups(ctx: Ctx, text: str, label: str) -> list[dict]:
             for m in re.finditer(r'\{[^{}]*"ids"\s*:\s*\[([^\]]*)\][^{}]*\}', e.text or "")
         ]
         ctx.graph.log({"kind": "dedup_salvaged", "groups": len(groups)})
+        if not groups:      # ответ оборван до первой группы (например, лимит ушёл на рассуждения модели)
+            ctx.graph.log({"kind": "dedup_failed", "error": f"LLMTruncated: {e}"[:300]})
+            return None
         return groups
     except Exception as e:
         ctx.graph.log({"kind": "dedup_failed", "error": f"{type(e).__name__}: {e}"[:300]})
-        return []
+        return None
     return [g for g in lst(data.get("groups") if isinstance(data, dict) else data) if isinstance(g, dict)]
 
 
-def _apply_groups(ctx: Ctx, groups: list[dict], by_id: dict[str, Node]) -> int:
+def _apply_groups(ctx: Ctx, groups: list[dict] | None, by_id: dict[str, Node]) -> int:
     merged = 0
+    if groups is None:
+        ctx.meta["dedup_failed"] = ctx.meta.get("dedup_failed", 0) + 1
+        return 0
     for g in groups:
         ids = lst(g.get("ids")) or ([g.get("keep")] + lst(g.get("duplicates")))
         group = [by_id[i] for i in dict.fromkeys(s(x) for x in ids) if i in by_id and by_id[i].state == "confirmed"]
@@ -164,6 +259,13 @@ def _dedup(ctx: Ctx, conf: list[Node]) -> None:
     if len(conf) < 2:
         return
     by_id = {n.id: n for n in conf}
+
+    # Проход 0: явные повторы сливает код. Модели остаются случаи, где нужен смысл, а не совпадение слов;
+    # если модель не ответит, отчёт всё равно не будет состоять из повторов.
+    ctx.meta["dedup_by_code"] = _apply_groups(ctx, _code_groups(conf), by_id)
+    conf = [n for n in conf if n.state == "confirmed"]
+    if len(conf) < 2:
+        return
 
     # Проход 1: весь список (большой список — частями, отсортированными по месту в документе).
     limit = max(1_000, ctx.room(prompts.load("dedup").system) - 400)
@@ -270,8 +372,13 @@ def run(ctx: Ctx, check: bool = True) -> None:
             "severity": n.payload["severity"], "title": n.payload["title"], "reason": n.payload["verify"]["reason"][:300],
         })
 
+    kept = [n for n in proposed if n.state == "confirmed"]
+    _normalize_criteria(ctx, kept)
     if check:
-        _dedup(ctx, [n for n in proposed if n.state == "confirmed"])
+        _dedup(ctx, kept)
+        _settle_severity(kept)
+        if ctx.meta.get("dedup_failed"):
+            ctx.say("   слияние дублей: модель не ответила, слиты только явные повторы (правилом, без модели)")
 
     # финальная нумерация: по месту в документе
     final = sorted(ctx.graph.of("finding", "confirmed"), key=lambda n: (_first_line(n), SEVERITY_ORDER[n.payload["severity"]], n.id))

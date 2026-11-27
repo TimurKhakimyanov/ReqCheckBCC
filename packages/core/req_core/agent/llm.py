@@ -51,6 +51,14 @@ _THINK_RE = re.compile(r"<(think|thinking|reasoning)>.*?</\1>", re.S | re.I)
 _FENCE_RE = re.compile(r"^```[a-zA-Z]*\s*|\s*```$", re.M)
 
 
+_OPEN_THINK_RE = re.compile(r"<(think|thinking|reasoning)>.*\Z", re.S | re.I)
+
+
+def _visible(text: str | None) -> str:
+    """Текст ответа без рассуждений модели, в том числе без незакрытого (оборванного) блока рассуждений."""
+    return _OPEN_THINK_RE.sub("", _THINK_RE.sub("", text or "")).strip()
+
+
 def parse_json(text: str) -> Any:
     """Достаёт JSON из ответа модели: убирает размышления, ```-ограждения и текст вокруг."""
     if text is None:
@@ -273,6 +281,13 @@ class AgentLLM:
                 self.budget.note_truncated()
                 last_err = f"ответ обрезан по лимиту {limit} токенов"
                 if not grow:
+                    # Пустой оборванный ответ — модель потратила весь лимит на рассуждения и не дошла до ответа.
+                    # Жёсткий лимит защищает от зацикливания в тексте ответа, а здесь текста нет: один повтор
+                    # с полным лимитом ответа.
+                    roomy = min(max(self.max_output, limit * 4), max(self.budget.window - est - 512, limit))
+                    if not _visible(reply.text) and attempt == 1 and roomy > limit:
+                        limit = roomy
+                        continue
                     raise LLMTruncated(last_err, reply.text)
                 partial = salvage_json(reply.text)
                 if isinstance(partial, (dict, list)) and partial and len(reply.text) > 2_000:

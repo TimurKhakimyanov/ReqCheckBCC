@@ -3,7 +3,7 @@ import json
 import re
 
 import pytest
-from req_contracts import Report
+from req_contracts import REQUIREMENT_CRITERIA, Report
 
 from req_core import render_report
 from req_core.chat import answer_stream
@@ -39,7 +39,8 @@ def test_markdown_escapes_pipes_in_tables(sample_report):
     for line in md.splitlines():
         if line.startswith("| R-"):
             cells = re.split(r"(?<!\\)\|", line.strip())[1:-1]
-            assert len(cells) == 4, line
+            # таблица нарезки — 4 столбца; сводная матрица — требование, критерии, замечания
+            assert len(cells) == 4 or 4 < len(cells) <= len(REQUIREMENT_CRITERIA) + 2, line
 
 
 def test_json_roundtrip(sample_report):

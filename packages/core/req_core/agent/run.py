@@ -53,7 +53,7 @@ from req_contracts import (
     ValidationOptions,
 )
 
-from ..text import QuoteLocator, SectionIndex, page_for, shorten
+from ..text import QuoteLocator, SectionIndex, page_for, plural, shorten
 from . import guard, prompts
 from .agents import clarifier, extractor, finalizer, planner, verifier
 from .agents.common import Ctx
@@ -275,6 +275,9 @@ class Run:
 
         self.stage("verify")
         verifier.run(ctx, check=opt.verify_pass)
+        if ctx.meta.get("dedup_failed"):
+            self.warnings.append("слияние дублей: модель не ответила, слиты только явные повторы — "
+                                 "в отчёте могут остаться похожие замечания")
 
         self.stage("clarify")
         jobs = []
@@ -425,7 +428,8 @@ class Run:
                 worst = min(fs, key=lambda f: SEV_RANK[f.severity.value])
                 set_checks.append(CriterionCheck(
                     criterion=c, verdict=CheckVerdict.FAIL, finding_ids=[f.id for f in fs], assessed_by=by,
-                    comment=f"{len(fs)} замечаний, наиболее серьёзное — {worst.id}: {worst.title}"))
+                    comment=(f"{plural(len(fs), 'замечание', 'замечания', 'замечаний')}, наиболее серьёзное — "
+                             f"{worst.id}: {worst.title}" if len(fs) > 1 else f"{worst.id}: {worst.title}")))
             elif ops:
                 why = next((o["rationale"] for o in ops if o["status"] == "ok" and o["rationale"]), "") or \
                     "Заявленные рецензентом нарушения не подтверждены верификатором"
@@ -556,8 +560,12 @@ class Run:
             notes.append(f"не проверены по всем критериям требования: {', '.join(cov['uncovered_reqs'][:8])}")
         if cov.get("reviews_failed"):
             notes.append(f"не ответили рецензенты набора: {', '.join(cov['reviews_failed'])}")
+        dedup_notes = [n for n in notes if n.startswith("слияние дублей")]
+        notes = [n for n in notes if n not in dedup_notes]
         if notes:
             rationale += (f" Внимание: отчёт может быть неполным ({'; '.join(n.split(':')[0] if len(n) > 120 else n for n in notes[:5])}).")
+        if dedup_notes:
+            rationale += f" Внимание: {dedup_notes[0]}."
         return Conclusion(
             ready_for_development=decision != Decision.BLOCKED, ready_for_testing=decision == Decision.READY,
             rationale=rationale, top_fixes=top, decision=decision, development=v.get("development", ""),

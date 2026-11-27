@@ -8,6 +8,7 @@ PDF рендерится в два прохода: первый узнаёт с�
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from pathlib import Path
@@ -29,6 +30,9 @@ from .render import (
 )
 
 RGB = tuple[int, int, int]
+
+# fontTools пишет на уровне INFO десятки строк о подмножестве шрифта — в журнале прогона это шум
+logging.getLogger("fontTools").setLevel(logging.WARNING)
 
 
 def _hex(s: str) -> RGB:
@@ -536,7 +540,9 @@ def _need(pdf: _Pdf, height: float) -> None:
 
 
 def _col_widths(pdf: _Pdf, header: list[str], rows: list[list[str]], width: float) -> list[float]:
-    pad = 4.8
+    many = len(header) >= 9  # широкая таблица (сводная матрица): поля и минимум столбца меньше, иначе шапка рвётся
+    pad = 3.9 if many else 4.8
+    floor = 9.0 if many else 12.0
     mins, wants = [], []
     for j in range(len(header)):
         texts = [_plain(r[j]) if j < len(r) else "" for r in rows]
@@ -548,7 +554,7 @@ def _col_widths(pdf: _Pdf, header: list[str], rows: list[list[str]], width: floa
         longest = max(longest, *(pdf.get_string_width(w) for w in head.split() or [""])) + pad
         widest = max(widest, pdf.get_string_width(head)) + pad
         pdf.font(8.2)
-        lo = min(max(longest, 12.0), width * 0.34)
+        lo = min(max(longest, floor), width * 0.34)
         mins.append(lo)
         wants.append(max(widest, lo))
     if sum(wants) <= width:

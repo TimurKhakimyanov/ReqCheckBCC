@@ -229,3 +229,10 @@ def page_for(offset: int | None, page_offsets: list[int] | None) -> int | None:
 def shorten(s: str, limit: int) -> str:
     s = " ".join(s.split())
     return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    """Число с существительным в нужной форме: 1 замечание, 2 замечания, 5 замечаний."""
+    k = abs(n) % 100
+    form = many if 11 <= k <= 14 else one if k % 10 == 1 else few if 2 <= k % 10 <= 4 else many
+    return f"{n} {form}"

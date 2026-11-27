@@ -30,6 +30,8 @@ from req_contracts import (
     SourceLocation,
 )
 
+from .text import plural
+
 KIND_RU = {
     RequirementKind.FUNCTIONAL: "Функциональное",
     RequirementKind.NON_FUNCTIONAL: "Нефункциональное",
@@ -114,7 +116,35 @@ def _where(loc: SourceLocation) -> str:
 
 def _check_comment(c) -> str:
     """«D-003: комментарий», «D-003» или «комментарий» — без висячего двоеточия."""
-    return ": ".join(x for x in (", ".join(c.finding_ids), _one_line(c.comment or "")) if x)
+    comment = _one_line(c.comment or "")
+    ids = ", ".join(c.finding_ids)
+    if ids and comment.startswith(ids):  # комментарий уже начинается с тех же идентификаторов
+        return comment
+    return ": ".join(x for x in (ids, comment) if x)
+
+
+_MD_HEADING_MARK = re.compile(r"(^|\s)#{1,6}\s+(?=\S)")
+_MD_TABLE_RULE = re.compile(r"\|(\s*:?-{3,}:?\s*\|)+")
+
+
+def _quote(s: str, n: int) -> str:
+    """Цитата для показа: без служебной разметки, которой агент размечает заголовки и строки таблиц
+    («#### », крайние «|», строка-разделитель шапки). Слова документа не меняются."""
+    s = _MD_TABLE_RULE.sub("|", _one_line(s))
+    s = _MD_HEADING_MARK.sub(r"\1", s)
+    s = re.sub(r"\|(\s*\|)+", "|", s)
+    s = re.sub(r"^\|\s*|\s*\|$", "", s.strip())
+    return _short(s, n)
+
+
+# Короткие названия критериев для сводной матрицы «требование × критерий»
+MATRIX_HEAD = {
+    "Необходимость": "Необх.", "Без проектных решений": "Без реш.", "Однозначность": "Однозн.",
+    "Полнота": "Полн.", "Атомарность": "Атом.", "Реализуемость": "Реализ.", "Проверяемость": "Провер.",
+    "Корректность": "Корр.", "Соответствие шаблону": "Шаблон", "Трассируемость": "Трасс.",
+}
+MATRIX_MARK = {CheckVerdict.PASS: "✔", CheckVerdict.FAIL: "✘", CheckVerdict.NOT_APPLICABLE: "—"}
+APPENDIX_MAX_LINES = 600  # документ длиннее — приложение с текстом не печатается
 
 
 def _finding_block(f: Finding) -> list[str]:
@@ -125,7 +155,7 @@ def _finding_block(f: Finding) -> list[str]:
     for i, loc in enumerate(f.locations, 1):
         suffix = f" {i}" if len(f.locations) > 1 else ""
         out.append(f"- **Где{suffix}:** {_where(loc)}")
-        out.append(f"- **Цитата{suffix}:** «{_short(loc.quote, 700)}»")
+        out.append(f"- **Цитата{suffix}:** «{_quote(loc.quote, 700)}»")
     out.append(f"- **Почему это нарушение:** {_one_line(f.explanation)}")
     if f.suggestion:
         out.append(f"- **Как исправить:** {_one_line(f.suggestion)}")
@@ -157,7 +187,9 @@ def render_markdown(report: Report) -> str:
     L += [
         "Статическая проверка документа требований до разработки по ISO/IEC/IEEE 29148:2018 (п. 5.2.5, 5.2.6) "
         "и IEEE Std 830-1998 (п. 4.3). Отчёт сформирован агентом Zoe автоматически; каждое нарушение "
-        "ссылается на место в документе и сопровождается цитатой, найденной в тексте кодом.", "",
+        "ссылается на место в документе и сопровождается цитатой, найденной в тексте кодом. "
+        "Обозначение вида L84 — номер строки документа в том виде, как его прочитал агент"
+        + ("; текст с номерами строк приведён в приложении." if _appendix_fits(report) else "."), "",
     ]
 
     # 1. Паспорт
@@ -205,25 +237,48 @@ def render_markdown(report: Report) -> str:
         head = "" if same else f"**{summary}**<br>"
         rows.append([
             r.id, src, KIND_RU[r.kind],
-            f"{head}«{_short(quote, 220)}»<br>*{r.location.section}"
+            f"{head}«{_quote(quote, 220)}»<br>*{r.location.section}"
             + (f", стр. {r.location.page}" if r.location.page else "") + "*",
         ])
     L += _table(["ID в отчёте", "ID в документе", "Тип", "Формулировка и цитата"], rows) + [""]
     if qs and (qs.extracted_by_coverage or qs.extracted_first_pass):
-        L += [f"Первый проход нарезки — {qs.extracted_first_pass} требований; контроль покрытия добавил "
-              f"{qs.extracted_by_coverage} (строки, не вошедшие ни в одно требование, перепроверены моделью).", ""]
+        L += [f"Первый проход нарезки — {plural(qs.extracted_first_pass, 'требование', 'требования', 'требований')}; "
+              f"контроль покрытия добавил {qs.extracted_by_coverage} (строки, не вошедшие ни в одно требование, "
+              "перепроверены моделью).", ""]
     if report.skipped:
         L += ["### Фрагменты, которые агент не счёл требованиями", ""]
         L += _table(["Строки", "Текст", "Причина"], [
-            [_lines(k.location), f"«{_short(k.location.quote, 160)}»", _one_line(k.reason)] for k in report.skipped
+            [_lines(k.location), f"«{_quote(k.location.quote, 160)}»", _one_line(k.reason)] for k in report.skipped
         ]) + [""]
 
     # 3. Проверка каждого требования
     L += ["## 3. Проверка каждого требования", ""]
     L += ["Каждое требование проверено по критериям отдельного требования: "
-          + ", ".join(CRITERIA[c].title_ru.lower() for c in REQUIREMENT_CRITERIA) + ".", ""]
+          + ", ".join(CRITERIA[c].title_ru.lower() for c in REQUIREMENT_CRITERIA) + ". Сначала — сводная матрица, "
+          "затем разбор по требованиям: нарушенные критерии показаны с замечаниями, остальные перечислены одной строкой.", ""]
     shown: set[str] = set()
     assess = {a.requirement_id: a for a in report.requirement_assessments}
+    if assess:
+        L += ["### Сводная матрица «требование × критерий»", ""]
+        # критерий, который ни к одному требованию не применён (трассируемость оценивается на уровне набора), — не столбец
+        used = [c for c in REQUIREMENT_CRITERIA
+                if any(ch.criterion == c and ch.verdict != CheckVerdict.NOT_APPLICABLE
+                       for a in assess.values() for ch in a.checks)]
+        rows = []
+        for r in report.requirements:
+            a = assess.get(r.id)
+            if not a:
+                continue
+            marks = {ch.criterion: MATRIX_MARK[ch.verdict] for ch in a.checks}
+            ids = [f.id for f in report.findings if r.id in f.requirement_ids]
+            rows.append([r.id + (f" ({r.source_id})" if r.source_id else ""),
+                         *[marks.get(c, "—") for c in used], ", ".join(ids) or "—"])
+        head = [MATRIX_HEAD.get(CRITERIA[c].title_ru, CRITERIA[c].title_ru) for c in used]
+        L += _table(["Треб.", *head, "Замечания"], rows) + [""]
+        left = [CRITERIA[c].title_ru.lower() for c in REQUIREMENT_CRITERIA if c not in used]
+        L += ["✔ — соответствует, ✘ — нарушение, «—» — критерий к требованию неприменим. "
+              + (f"На уровне набора (раздел 4) оценивается: {', '.join(left)}. " if left else "")
+              + "В столбце «Замечания» — все дефекты, затрагивающие требование, включая дефекты набора.", ""]
     for r in report.requirements:
         title = f"### {r.id}"
         if r.source_id:
@@ -233,20 +288,29 @@ def render_markdown(report: Report) -> str:
         title += f" — {_one_line(r.summary)}"
         L += [title, ""]
         L += [f"- **Тип:** {KIND_RU[r.kind]}", f"- **Где:** {_where(r.location)}",
-              f"- **Текст:** «{_short(r.location.quote, 900)}»"]
+              f"- **Текст:** «{_quote(r.location.quote, 900)}»"]
         if children.get(r.id):
             L.append(f"- **Составное требование**, атомарные части: {', '.join(children[r.id])}")
-        L.append("")
         a = assess.get(r.id)
         if a:
             fails = [c for c in a.checks if c.verdict == CheckVerdict.FAIL]
-            L += _table(["Критерий", "Результат", "Комментарий"], [
-                [_crit(c.criterion), VERDICT_RU[c.verdict],
-                 _check_comment(c)]
-                for c in a.checks
-            ]) + [""]
-            if not fails:
+            passed = [CRITERIA[c.criterion].title_ru.lower() for c in a.checks if c.verdict == CheckVerdict.PASS]
+            skipped = [CRITERIA[c.criterion].title_ru.lower() + (f" ({_one_line(c.comment)})" if c.comment
+                                                                  and "уровне набора" not in c.comment else "")
+                       for c in a.checks if c.verdict == CheckVerdict.NOT_APPLICABLE]
+            if passed:
+                L.append(f"- **Соответствует:** {', '.join(passed)}")
+            if skipped:
+                L.append(f"- **Неприменимо:** {', '.join(skipped)}")
+            L.append("")
+            if fails:
+                L += _table(["Нарушенный критерий", "Результат", "Комментарий"], [
+                    [_crit(c.criterion), VERDICT_RU[c.verdict], _check_comment(c)] for c in fails
+                ]) + [""]
+            else:
                 L += ["Нарушений по критериям отдельного требования не выявлено.", ""]
+        else:
+            L.append("")
         own = [f for f in report.findings if r.id in f.requirement_ids and f.scope == FindingScope.REQUIREMENT]
         for f in own:
             if f.id in shown:
@@ -256,8 +320,10 @@ def render_markdown(report: Report) -> str:
             L += _finding_block(f)
         set_refs = [f for f in report.findings if r.id in f.requirement_ids and f.scope == FindingScope.SET]
         if set_refs:
-            L += ["Также затрагивают это требование дефекты набора (раздел 4): "
-                  + "; ".join(f"{f.id} — {_one_line(f.title)}" for f in set_refs), ""]
+            named = "; ".join(f"{f.id} — {_one_line(f.title)}" for f in set_refs[:SET_REFS_NAMED])
+            rest = ", ".join(f.id for f in set_refs[SET_REFS_NAMED:])
+            L += ["Также затрагивают это требование дефекты набора (раздел 4): " + named
+                  + (f"; а также {rest}" if rest else ""), ""]
 
     # 4. Проверка набора
     L += ["## 4. Проверка всего набора требований", ""]
@@ -332,7 +398,7 @@ def render_markdown(report: Report) -> str:
     if crit:
         L += _table(["Дефект", "Требования", "Критерий", "Суть", "Место"], [
             [f.id, ", ".join(f.requirement_ids) or "набор", CRITERIA[f.criterion].title_ru, _one_line(f.title),
-             f"{f.locations[0].section}: «{_short(f.locations[0].quote, 120)}»"]
+             f"{f.locations[0].section}: «{_quote(f.locations[0].quote, 120)}»"]
             for f in crit
         ]) + [""]
     else:
@@ -386,13 +452,30 @@ def render_markdown(report: Report) -> str:
         L += ["**Сильные стороны документа:**", ""]
         L += [f"- {_one_line(x)}" for x in c.strengths] + [""]
 
+    # Приложение: текст документа с номерами строк — чтобы любую ссылку «строка N» / «L<N>» можно было проверить
+    if _appendix_fits(report):
+        L += [f"## {n + 2}. Приложение: текст документа с номерами строк", ""]
+        L += ["Документ в том виде, как его прочитал агент. На эти номера ссылаются поля «Где» и обозначения "
+              "вида L84 в тексте замечаний, вопросов и итога. Пустые строки опущены.", ""]
+        L += _table(["Строка", "Текст"], [
+            [f"L{i}", ln.strip()] for i, ln in enumerate(report.document.text.split("\n"), 1) if ln.strip()
+        ]) + [""]
+
     L += ["---", "",
-          f"*Методика bbc-agent: нарезка требований в два прохода (модель + контроль покрытия + кандидаты правил), "
+          f"*Методика проверки: нарезка требований в два прохода (модель + контроль покрытия + кандидаты правил), "
           f"детерминированные правила как подсказки агентам, инспектор по матрице «требование × критерий» с раундами "
           f"до полного покрытия, шесть рецензентов набора с разными ролями, контроль достоверности кодом (цитаты, "
           f"ссылки), верификатор (опровержение и слияние дублей), уточняющие вопросы автору и итог руководителя ревью. "
           f"Агент Zoe {p.agent_version}, схема отчёта {report.schema_version}.*", ""]
     return "\n".join(L)
+
+
+SET_REFS_NAMED = 4  # сколько дефектов набора под требованием показывать с названием; остальные — только номера
+
+
+def _appendix_fits(report: Report) -> bool:
+    text = report.document.text or ""
+    return bool(text.strip()) and text.count("\n") < APPENDIX_MAX_LINES
 
 
 # ---------------------------------------------------------------- разбор markdown-подмножества

@@ -12,6 +12,10 @@ COPY packages/contracts packages/contracts
 COPY packages/core packages/core
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install packages/contracts packages/core
+# Версия агента для паспорта отчёта — коммит из .git (если сборка идёт из клона); README.md нужен, чтобы COPY
+# не падал, когда каталога .git нет (сборка из архива): тогда версия берётся из AGENT_VERSION.
+COPY README.md .gi[t] /tmp/gitinfo/
+RUN python -m req_core.version /tmp/gitinfo > /etc/reqcheck-git-version && rm -rf /tmp/gitinfo
 ARG AGENT_VERSION=dev
 ENV AGENT_VERSION=${AGENT_VERSION}
 RUN printf '%s' "$AGENT_VERSION" > /etc/reqcheck-agent-version
