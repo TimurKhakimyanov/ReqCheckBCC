@@ -61,6 +61,10 @@ coverage/
 
 # Runtime data
 reports/
+# Документы и отчёты CLI (./data монтируется в контейнер cli), настройки CLI и кэш ответов модели
+/data/
+cli.env
+.cache/
 *.log
 
 # Бэкапы (профиль backup)
