@@ -1,0 +1,12 @@
+# Дашборды из этого каталога (*.json) подгружаются при старте Grafana; правки в UI не сохраняются.
+apiVersion: 1
+providers:
+  - name: reqcheck
+    folder: ReqCheck
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
