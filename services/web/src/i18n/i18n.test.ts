@@ -25,14 +25,23 @@ function sourceFiles(dir: string): string[] {
 describe('i18n', () => {
   it('discovers every locale file automatically', () => {
     expect(languages.map((l) => l.code)).toEqual(['ru', 'en', 'kk'])
-    expect(languages.find((l) => l.code === 'kk')?.ready).toBe(false)
+    expect(languages.every((l) => l.ready)).toBe(true)
   })
 
-  it('ru and en have the same keys', () => {
+  it.each(['en', 'kk'])('ru and %s have the same keys', (lng) => {
     const ru = keysOf('ru')
-    const en = keysOf('en')
-    expect([...ru].filter((k) => !en.has(k))).toEqual([])
-    expect([...en].filter((k) => !ru.has(k))).toEqual([])
+    const other = keysOf(lng)
+    expect([...ru].filter((k) => !other.has(k))).toEqual([])
+    expect([...other].filter((k) => !ru.has(k))).toEqual([])
+  })
+
+  it('kk keeps every {{placeholder}} of the Russian text', () => {
+    const flat = (obj: Tree, prefix = ''): [string, string][] =>
+      Object.entries(obj).flatMap(([k, v]) => (typeof v === 'string' ? [[prefix + k, v] as [string, string]] : flat(v, `${prefix}${k}.`)))
+    const vars = (s: string) => [...s.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map((m) => m[1]).sort().join(',')
+    const ru = new Map(flat(resources.ru.translation as Tree).map(([k, v]) => [k.replace(PLURAL, ''), v]))
+    const bad = flat(resources.kk.translation as Tree).filter(([k, v]) => ru.has(k.replace(PLURAL, '')) && vars(v) !== vars(ru.get(k.replace(PLURAL, ''))!))
+    expect(bad.map(([k]) => k)).toEqual([])
   })
 
   it('every static t() key used in the code exists in ru and en', () => {
@@ -44,7 +53,7 @@ describe('i18n', () => {
       for (const m of code.matchAll(/key: '([a-z]+\.[a-zA-Z.]+)'/g)) used.add(m[1])
     }
     expect(used.size).toBeGreaterThan(100)
-    for (const lng of ['ru', 'en']) {
+    for (const lng of ['ru', 'en', 'kk']) {
       const keys = keysOf(lng)
       expect([...used].filter((k) => !keys.has(k)), lng).toEqual([])
     }
@@ -69,13 +78,13 @@ describe('i18n', () => {
       ...['free_gemini', 'paid_api', 'local'].flatMap((p) => [`params.preset.${p}`, `params.preset.${p}Hint`]),
       ...['providers', 'params', 'account'].map((tab) => `settings.tabs.${tab}`),
     ]
-    for (const lng of ['ru', 'en']) {
+    for (const lng of ['ru', 'en', 'kk']) {
       const keys = keysOf(lng)
       expect(dynamic.filter((k) => !keys.has(k)), lng).toEqual([])
     }
   })
 
-  it('uses Russian plural forms and falls back from kk to ru', async () => {
+  it('uses Russian and Kazakh plural forms', async () => {
     await i18n.changeLanguage('ru')
     expect(i18n.t('report.findingCount', { count: 1 })).toBe('1 дефект')
     expect(i18n.t('report.findingCount', { count: 3 })).toBe('3 дефекта')
@@ -84,7 +93,8 @@ describe('i18n', () => {
     expect(i18n.t('report.findingCount', { count: 7 })).toBe('7 findings')
     await i18n.changeLanguage('kk')
     expect(i18n.t('nav.documents')).toBe('Құжаттар')
-    expect(i18n.t('report.tabs.matrix')).toBe('Матрица')
+    expect(i18n.t('report.findingCount', { count: 1 })).toBe('1 ақау')
+    expect(i18n.t('report.findingCount', { count: 7 })).toBe('7 ақау')
     await i18n.changeLanguage('ru')
   })
 })

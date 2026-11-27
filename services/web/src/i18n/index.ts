@@ -35,7 +35,7 @@ function initialLanguage(): string {
 void i18n.use(initReactI18next).init({
   resources,
   lng: initialLanguage(),
-  // Недопереведённый казахский показывает русский, остальные — английский, затем русский.
+  // Если строки нет в переводе: казахский показывает русский, остальные — английский, затем русский.
   fallbackLng: { kk: ['ru'], default: ['en', 'ru'] },
   interpolation: { escapeValue: false },
   returnNull: false,
