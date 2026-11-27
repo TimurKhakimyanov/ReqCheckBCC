@@ -29,11 +29,26 @@ x-app-env: &app-env
 services:
   # ===================== Веб (сессия «Веб») =====================
   web:
-    build: { context: ., dockerfile: services/web/Dockerfile, target: runtime }
+    build:
+      context: .
+      dockerfile: services/web/Dockerfile
+      target: runtime
+      args: { AGENT_VERSION: "${AGENT_VERSION:-dev}" }
     restart: unless-stopped
     depends_on: [api]
     ports: ["${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-8080}:8080"]
     networks: [frontend]
+
+  # Веб на моках (MSW) без бэкенда — показать интерфейс:
+  # docker compose --profile mock up -d --build web-mock  →  http://localhost:${WEB_MOCK_PORT:-8081} (admin / admin)
+  web-mock:
+    build:
+      context: .
+      dockerfile: services/web/Dockerfile
+      target: runtime
+      args: { VITE_USE_MOCKS: "true", AGENT_VERSION: "${AGENT_VERSION:-dev}" }
+    profiles: [mock]
+    ports: ["${BIND_ADDR:-127.0.0.1}:${WEB_MOCK_PORT:-8081}:8080"]
 
   # ===================== Бэкенд (сессия «Бэкенд») =====================
   api:
