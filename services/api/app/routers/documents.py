@@ -30,8 +30,9 @@ CONTENT_TYPES = {"pdf": "application/pdf", "md": "text/markdown; charset=utf-8",
 
 
 def content_disposition(filename: str) -> str:
-    ascii_name = filename.encode("ascii", "ignore").decode() or "file"
-    ascii_name = ascii_name.replace('"', "")
+    ascii_name = filename.encode("ascii", "ignore").decode().replace('"', "").strip()
+    if not ascii_name or ascii_name.startswith("."):
+        ascii_name = "document" + ascii_name
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
 
 

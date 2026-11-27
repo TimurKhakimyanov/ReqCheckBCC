@@ -15,6 +15,7 @@ from req_contracts import CRITERIA
 from sqlalchemy import select
 
 from .db import SessionLocal
+from .embeddings import EmbedderError
 from .models import KnowledgeItem
 from .services import Services
 from .vectors import KNOWLEDGE, point_id
@@ -90,7 +91,8 @@ def index_item(svc: Services, item_id: uuid.UUID, chunks: list[str] | None = Non
             ])
             item.chunks, item.status, item.error = len(parts), "ready", None
         except Exception as e:  # noqa: BLE001
-            log.warning("knowledge indexing failed", extra={"item_id": str(item_id)}, exc_info=True)
+            log.warning("knowledge indexing failed", extra={"item_id": str(item_id), "error": str(e)},
+                        exc_info=not isinstance(e, EmbedderError))
             item.status, item.error = "failed", f"{type(e).__name__}: {e}"[:500]
         db.commit()
 
@@ -120,8 +122,9 @@ def start_builtin_indexer(svc: Services, attempts: int = 60, delay_s: float = 10
                 if ensure_builtin(svc):
                     log.info("builtin knowledge ready")
                     return
-            except Exception:  # noqa: BLE001
-                log.warning("builtin knowledge indexing attempt failed", extra={"attempt": attempt}, exc_info=True)
+            except Exception as e:  # noqa: BLE001
+                log.warning("builtin knowledge indexing attempt failed", extra={"attempt": attempt, "error": str(e)},
+                            exc_info=not isinstance(e, EmbedderError))
             time.sleep(delay_s)
 
     t = threading.Thread(target=_loop, name="builtin-knowledge", daemon=True)

@@ -39,6 +39,14 @@ EXPORT_FORMATS = {
 CORE_START, CORE_END = 0.02, 0.90
 
 
+class _RunLog(logging.LoggerAdapter):
+    """Добавляет run_id, не теряя extra конкретного вызова (merge_extra появился только в 3.13)."""
+
+    def process(self, msg, kwargs):
+        kwargs["extra"] = {**(self.extra or {}), **(kwargs.get("extra") or {})}
+        return msg, kwargs
+
+
 class RunCancelled(Exception):
     pass
 
@@ -195,7 +203,7 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
     started = time.monotonic()
     progress = Progress(svc, run_id)
     provider = "unknown"
-    lg = logging.LoggerAdapter(log, {"run_id": run_id})
+    lg = _RunLog(log, {"run_id": run_id})
 
     with SessionLocal() as db:
         run = db.get(Run, rid)

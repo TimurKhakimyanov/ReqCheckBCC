@@ -7,7 +7,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-_RESERVED = set(vars(logging.LogRecord("", 0, "", 0, "", (), None))) | {"message", "asctime", "taskName"}
+_RESERVED = set(vars(logging.LogRecord("", 0, "", 0, "", (), None))) | {"message", "asctime", "taskName", "color_message"}
 
 
 class JsonFormatter(logging.Formatter):
@@ -37,9 +37,11 @@ def setup_logging(service: str, level: str = "INFO") -> None:
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level.upper())
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "celery", "celery.task", "celery.worker"):
+    for name in ("uvicorn", "uvicorn.error", "celery", "celery.task", "celery.worker"):
         lg = logging.getLogger(name)
         lg.handlers[:] = []
         lg.propagate = True
+    # доступ логирует MetricsMiddleware (с длительностью и маршрутом); стандартный access-лог uvicorn выключен
+    logging.getLogger("uvicorn.access").disabled = True
     for noisy in ("httpx", "httpcore", "botocore", "boto3", "urllib3", "s3transfer"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

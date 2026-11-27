@@ -44,9 +44,10 @@ def _setup_logging() -> None:
     root = logging.getLogger()
     root.handlers[:] = [h]
     root.setLevel(os.getenv("LOG_LEVEL", "INFO").upper())
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    for name in ("uvicorn", "uvicorn.error"):
         logging.getLogger(name).handlers[:] = []
         logging.getLogger(name).propagate = True
+    logging.getLogger("uvicorn.access").disabled = True
     for noisy in ("httpx", "httpcore", "urllib3", "sentence_transformers"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
