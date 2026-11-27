@@ -70,7 +70,7 @@ describe('i18n', () => {
       ...PROVIDERS.map((p) => `provider.${p}`),
       ...PROVIDERS.map((p) => `settings.providerHint.${p}`),
       ...ALL_CRITERIA.flatMap((c) => [`criteria.${c}.title`, `criteria.${c}.short`, `criteria.${c}.description`]),
-      ...['verify_pass', 'split_compound', 'fill_checklist'].flatMap((o) => [`launch.opt.${o}`, `launch.opt.${o}Hint`]),
+      ...['verify_pass', 'split_compound', 'fill_checklist', 'ask_author'].flatMap((o) => [`launch.opt.${o}`, `launch.opt.${o}Hint`]),
       ...['upload.badFormat', 'upload.tooLarge'],
       ...PROVIDER_ERROR_KINDS.flatMap((k) => [`providerError.${k}.title`, `providerError.${k}.hint`]),
       ...Object.keys(SETTING_LIMITS).flatMap((k) => [`params.${k}.label`, `params.${k}.unit`, `params.${k}.hint`]),

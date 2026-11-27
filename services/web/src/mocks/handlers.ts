@@ -4,13 +4,15 @@ import { formatSSE } from '@/api/sse'
 import type { AppSettingsUpdate, DocumentFormat, ExportFormat, FindingReview, ProviderId, ProviderUpdate, ReviewStatus, RunCreate } from '@/api/types'
 import { EMBEDDINGS_DIM_LIMITS, EMBEDDINGS_PROVIDERS, isProviderConfigured, isTerminal, PROVIDERS, SETTING_LIMITS } from '@/api/types'
 import {
-  probeProvider,
+  answerRun,
   chatAnswer,
   db,
+  isAsking,
   logAudit,
   materialize,
   MODELS,
   newRun,
+  probeProvider,
   progressOf,
   sampleReport,
   setSession,
@@ -400,6 +402,30 @@ export const handlers = [
     guard(({ params }: { params: Record<string, string> }) => {
       const r = db.runs.find((x) => x.id === params.id)
       return r ? HttpResponse.json(materialize(r)) : err(404, 'Run not found', 'not_found')
+    }),
+  ),
+  http.get(
+    A('/runs/:id/questions'),
+    guard(({ params }: { params: Record<string, string> }) => {
+      const r = db.runs.find((x) => x.id === params.id)
+      if (!r) return err(404, 'Run not found', 'not_found')
+      materialize(r)
+      return HttpResponse.json(isAsking(r) ? { waiting: true, questions: sampleReport.questions ?? [] } : { waiting: false, questions: [] })
+    }),
+  ),
+  http.post(
+    A('/runs/:id/answers'),
+    guard(async ({ params, request }: { params: Record<string, string>; request: Request }) => {
+      const r = db.runs.find((x) => x.id === params.id)
+      if (!r) return err(404, 'Run not found', 'not_found')
+      materialize(r)
+      if (!isAsking(r)) return err(409, 'Прогон сейчас не ждёт ответов автора', 'not_waiting')
+      const { answers = {} } = (await request.json()) as { answers?: Record<string, string> }
+      const ids = new Set((sampleReport.questions ?? []).map((q) => q.id))
+      const clean = Object.fromEntries(Object.entries(answers).filter(([k, v]) => ids.has(k) && v?.trim()).map(([k, v]) => [k, v.trim()]))
+      answerRun(r, clean)
+      logAudit('run_answers', r.id, { answered: Object.keys(clean) })
+      return HttpResponse.json({ waiting: false, questions: [] }, { status: 202 })
     }),
   ),
   http.post(

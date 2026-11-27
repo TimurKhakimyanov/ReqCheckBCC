@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextvars
+import json
 import logging
+import os
 import tempfile
 import threading
 import time
@@ -21,9 +23,17 @@ from app.indexing import index_report
 from app.models import Document, ReportRow, Run
 from app.providers import ProviderNotConfigured, build_provider_config
 from app.serialize import summary_from_report
-from app.services import TASK_RUN_VALIDATION, Services, get_services, run_cancel_key, run_events_channel
+from app.services import (
+    TASK_RUN_VALIDATION,
+    Services,
+    get_services,
+    run_answers_key,
+    run_cancel_key,
+    run_events_channel,
+    run_questions_key,
+)
 from app.vectors import KNOWLEDGE
-from req_contracts import ProgressEvent, Report, RunStage, ValidationOptions
+from req_contracts import ClarifyingQuestion, ProgressEvent, Report, RunStage, ValidationOptions
 
 from . import runlog
 from .celery_app import celery
@@ -49,6 +59,8 @@ EXPORT_FORMATS = {
 }
 # Доля общего прогресса, отведённая ядру; остальное — выгрузки и индексация.
 CORE_START, CORE_END = 0.02, 0.90
+# Сколько прогон ждёт ответов автора на вопросы (options.ask_author); потом продолжает без них.
+ASK_AUTHOR_TIMEOUT_S = int(os.getenv("ASK_AUTHOR_TIMEOUT_S", "1800"))
 
 
 class _RunLog(logging.LoggerAdapter):
@@ -81,6 +93,13 @@ class Progress:
         self._lock = threading.Lock()
         self._stage: str | None = None
         self._stage_started = time.monotonic()
+        # ожидание ответов автора не входит в таймаут прогона: человек отвечает сколько нужно
+        self.paused_s = 0.0
+        self.waiting_since: float | None = None
+
+    def paused(self) -> float:
+        since = self.waiting_since
+        return self.paused_s + (time.monotonic() - since if since is not None else 0.0)
 
     def _track_stage(self, stage: str) -> None:
         if stage != self._stage:
@@ -188,13 +207,55 @@ def run_with_watchdog(fn: Callable[[], Report], progress: Progress, timeout_s: i
             except FutureTimeout:
                 if progress.cancelled():
                     raise RunCancelled("run cancelled") from None
-                if time.monotonic() > deadline:
+                if time.monotonic() - progress.paused() > deadline:
                     raise RunTimedOut() from None
     finally:
         # Зависший поток ядра не убить; флаг отмены прервёт его на следующем on_progress.
         if not future.done():
             progress.svc.redis.set(run_cancel_key(progress.run_id), "1", ex=86400)
         pool.shutdown(wait=False, cancel_futures=True)
+
+
+def make_ask_author(progress: Progress, sink: runlog.RunLogSink) -> Callable[[list[ClarifyingQuestion]], dict[str, str]]:
+    """Веб-аналог --ask bbc-agent: вопросы — в Redis (их показывает экран прогона), ответы ждём оттуда же.
+    Отмена прогона прерывает ожидание; без ответов за ASK_AUTHOR_TIMEOUT_S прогон продолжается без них."""
+
+    def ask(questions: list[ClarifyingQuestion]) -> dict[str, str]:
+        r = progress.svc.redis
+        qkey, akey = run_questions_key(progress.run_id), run_answers_key(progress.run_id)
+        message = f"Ждём ответов автора: вопросов {len(questions)}"
+        r.delete(akey)
+        r.set(qkey, json.dumps([q.model_dump(mode="json") for q in questions], ensure_ascii=False),
+              ex=ASK_AUTHOR_TIMEOUT_S + 3600)
+        sink.add("info", "worker", message, data={"questions": [q.id for q in questions]})
+        progress.emit(RunStage.VERIFYING, progress._last_progress, message, force_db=True)
+        start = progress.waiting_since = time.monotonic()
+        beat = start
+        try:
+            while True:
+                raw = r.get(akey)
+                if raw is not None:
+                    data = json.loads(raw) if raw else {}
+                    answers = {str(k): str(v) for k, v in (data or {}).items() if str(v).strip()}
+                    sink.add("info", "worker", f"Ответы автора получены: {len(answers)} из {len(questions)}",
+                             data={"answered": sorted(answers)})
+                    return answers
+                if progress.cancelled():
+                    raise RunCancelled("run cancelled")
+                now = time.monotonic()
+                if now - start > ASK_AUTHOR_TIMEOUT_S:
+                    sink.add("warning", "worker", "Ответов автора не дождались — продолжаем без них")
+                    return {}
+                if now - beat > 15:  # событие раз в 15 с: экран прогона видит, что прогон жив и ждёт
+                    beat = now
+                    progress.emit(RunStage.VERIFYING, progress._last_progress, message)
+                time.sleep(1)
+        finally:
+            progress.paused_s += time.monotonic() - start
+            progress.waiting_since = None
+            r.delete(qkey, akey)
+
+    return ask
 
 
 def _finish(run_id: uuid.UUID, status: RunStage, *, error: str | None = None, message: str = "") -> bool:
@@ -292,9 +353,11 @@ def _execute_run(run_id: str, svc: Services, settings, rid: uuid.UUID, started: 
                      data={"snippets": [x[:200] for x in extra]})
             if extra:
                 options = options.model_copy(update={"knowledge_snippets": [*options.knowledge_snippets, *extra]})
+            # вопросы автору по ходу прогона — только если их попросили при запуске
+            ask = {"ask_author": make_ask_author(progress, sink)} if options.ask_author else {}
             report = run_with_watchdog(
                 lambda: req_core.validate_document(path, cfg, options=options, on_progress=progress.on_core_progress,
-                                                   document_name=doc_name),
+                                                   document_name=doc_name, **ask),
                 progress, run_timeout,
             )
         if progress.cancelled():

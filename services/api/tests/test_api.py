@@ -397,6 +397,32 @@ async def test_cancel_and_delete(client, services):
     assert (await client.get(f"/api/runs/{run['id']}")).status_code == 404
 
 
+async def test_author_answers_during_run(client, services):
+    """Веб-аналог --ask: воркер выложил вопросы в Redis — API отдаёт их экрану прогона и принимает ответы."""
+    import json
+
+    from app.services import run_answers_key, run_questions_key
+
+    run = (await client.post("/api/runs", json={"document_id": state["doc"]["id"], "options": {"ask_author": True}})).json()
+    assert run["options"]["ask_author"] is True
+    assert (await client.get(f"/api/runs/{run['id']}/questions")).json() == {"waiting": False, "questions": []}
+    r = await client.post(f"/api/runs/{run['id']}/answers", json={"answers": {"Q-01": "да"}})
+    assert r.status_code == 409 and r.json()["code"] == "not_waiting"
+
+    qs = [{"id": "Q-01", "question": "Какая дата?", "why": "Иначе по-разному", "options": ["Совершения", "Проведения"]},
+          {"id": "Q-02", "question": "Повторять push?", "why": "Неясно"}]
+    services.redis.set(run_questions_key(run["id"]), json.dumps(qs))
+    r = (await client.get(f"/api/runs/{run['id']}/questions")).json()
+    assert r["waiting"] is True and [q["id"] for q in r["questions"]] == ["Q-01", "Q-02"]
+    r = await client.post(f"/api/runs/{run['id']}/answers",
+                          json={"answers": {"Q-01": " Совершения ", "Q-02": "", "Q-77": "чужой"}})
+    assert r.status_code == 202
+    # воркер получит только ответы на свои вопросы, без пустых
+    assert json.loads(services.redis.get(run_answers_key(run["id"]))) == {"Q-01": "Совершения"}
+    services.redis.delete(run_questions_key(run["id"]), run_answers_key(run["id"]))
+    await client.post(f"/api/runs/{run['id']}/cancel")
+
+
 async def test_usage_and_audit(client):
     r = await client.get("/api/usage")
     body = r.json()

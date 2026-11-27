@@ -33,7 +33,7 @@ describe('AI parameters tab', () => {
     // своя проверка диапазона — без похода на сервер
     expect(await screen.findByText('Допустимо от 1 до 16')).toBeInTheDocument()
     expect(field).toHaveAttribute('aria-invalid', 'true')
-    expect(db.settings.concurrency).toBe(1)
+    expect(db.settings.concurrency).toBe(8)
     // сервер тоже проверяет: 422 с errors раскладывается по полям
     await expect(api.updateSettings({ concurrency: 99 })).rejects.toMatchObject({ status: 422, errors: [{ loc: ['body', 'concurrency'] }] })
   })

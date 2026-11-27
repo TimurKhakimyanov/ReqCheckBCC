@@ -5,13 +5,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
 from pydantic import BaseModel
-from req_contracts import ParsedDocument, ProgressCallback, ProviderConfig, Report, ValidationOptions
+from req_contracts import ClarifyingQuestion, ParsedDocument, ProgressCallback, ProviderConfig, Report, ValidationOptions
 
 __version__ = "0.1.0"
 
@@ -43,7 +43,10 @@ def validate_document(
     options: ValidationOptions | None = None,
     on_progress: ProgressCallback | None = None,
     document_name: str | None = None,
+    ask_author: Callable[[list[ClarifyingQuestion]], dict[str, str]] | None = None,
 ) -> Report:
+    """ask_author — ответы автора по ходу прогона (веб-аналог --ask): при options.ask_author ядро останавливается
+    на вопросах, передаёт их сюда и ждёт {Q-01: ответ}; пустой dict — продолжить без ответов."""
     from req_contracts import ProgressEvent, RunStage
 
     from .pipeline import run_pipeline
@@ -53,7 +56,7 @@ def validate_document(
     doc = parse_document(Path(path), name=document_name)
     client = get_llm(llm)
     return run_pipeline(doc, client, options=options, on_progress=on_progress,
-                        provider=llm.provider.value, model=getattr(client, "model", llm.model))
+                        provider=llm.provider.value, model=getattr(client, "model", llm.model), ask_author=ask_author)
 
 
 def render_report(report: Report, fmt: ReportFormat) -> bytes:

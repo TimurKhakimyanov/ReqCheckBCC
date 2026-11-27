@@ -105,6 +105,7 @@ export function ReportView({ run }: { run: Run }) {
   const ctx: ReportCtx | null = report.data
     ? {
         runId: run.id,
+        run,
         report: report.data,
         findingsById,
         reviews,

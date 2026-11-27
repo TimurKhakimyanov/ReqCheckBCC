@@ -69,7 +69,7 @@ export interface ProviderSettings {
   extra_body_set_review?: Record<string, unknown> | null
   /** Лимит токенов ответа; null — ядро выбирает с запасом */
   max_output_tokens?: number | null
-  /** Таймаут одного запроса к модели, с; null — 180 */
+  /** Таймаут одного запроса к модели, с; null — 600 (как в bbc-agent) */
   timeout_s?: number | null
 }
 
@@ -162,8 +162,8 @@ export const SETTING_LIMITS: Record<NumericSetting, { min: number; max: number; 
   run_timeout_s: { min: 60, max: 21600, step: 60, default: 1800 },
   min_interval_s: { min: 0, max: 120, step: 0.5, default: 0 },
   max_attempts: { min: 1, max: 20, step: 1, default: 6 },
-  batch_size: { min: 1, max: 50, step: 1, default: 6 },
-  concurrency: { min: 1, max: 16, step: 1, default: 1 },
+  batch_size: { min: 1, max: 50, step: 1, default: 5 },
+  concurrency: { min: 1, max: 16, step: 1, default: 8 },
   max_upload_mb: { min: 1, max: 500, step: 1, default: 25 },
   session_ttl_hours: { min: 1, max: 720, step: 1, default: 12 },
 }
@@ -216,14 +216,28 @@ export interface ValidationOptions {
   fill_checklist?: boolean
   /** Уточняющие вопросы автору документа (раздел «Вопросы» отчёта) */
   ask_questions?: boolean
+  /** Ответы автора на вопросы прошлого прогона {Q-01: ответ} — агент предложит новые формулировки требований */
+  answers?: Record<string, string>
+  /** Остановиться на вопросах и спросить автора на экране прогона (как --ask в bbc-agent) */
+  ask_author?: boolean
 }
 
-export const DEFAULT_OPTIONS: Required<ValidationOptions> = {
+/** GET /runs/{id}/questions: прогон остановился на вопросах и ждёт ответов автора */
+export interface PendingQuestions {
+  waiting: boolean
+  questions: ClarifyingQuestion[]
+}
+
+/** Флажки окна запуска; ответы автора задаются не здесь, а во вкладке «Вопросы» отчёта. */
+export type LaunchOptions = Required<Omit<ValidationOptions, 'answers'>>
+
+export const DEFAULT_OPTIONS: LaunchOptions = {
   language: 'ru',
   verify_pass: true,
   split_compound: true,
   fill_checklist: true,
   ask_questions: true,
+  ask_author: true,
 }
 
 export interface RunSummary {

@@ -96,6 +96,11 @@ services:
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}  # прогонов одновременно (нужен перезапуск воркера)
       WORKER_METRICS_PORT: "9101"  # Prometheus: worker:9101/metrics
       PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+      # Кэш ответов модели, как в bbc-agent: повторный прогон того же документа с теми же настройками — за секунды.
+      # Пустое значение выключает кэш.
+      LLM_CACHE_DIR: ${LLM_CACHE_DIR-/cache/llm}
+    volumes:
+      - llm-cache:/cache
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -557,6 +562,7 @@ networks:
   backend:
 
 volumes:
+  llm-cache:
   postgres-data:
   redis-data:
   qdrant-data:

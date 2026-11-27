@@ -127,3 +127,6 @@ export const FLOW: { id: string; agents: string[] }[] = [
 ]
 
 export const PRINCIPLES = ['graph', 'coverage', 'quotes', 'refute', 'schema', 'parallel', 'progress', 'kb'] as const
+
+/** Как запуск ускорен без потери качества — настройки как в bbc-agent (agentsPage.speed.<id>) */
+export const SPEED = ['window', 'parallel', 'cache', 'limits'] as const

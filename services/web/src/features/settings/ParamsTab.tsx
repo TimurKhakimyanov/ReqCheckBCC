@@ -52,7 +52,8 @@ const toDraft = (s: AppSettings): Draft => ({
 export const PRESETS: Record<'free_gemini' | 'paid_api' | 'local', Partial<Record<NumericSetting, number>>> = {
   free_gemini: { min_interval_s: 6, concurrency: 1, max_attempts: 8, batch_size: 6 },
   paid_api: { min_interval_s: 0, concurrency: 4, max_attempts: 6, batch_size: 8 },
-  local: { min_interval_s: 0, concurrency: 1, max_attempts: 4, batch_size: 3, run_timeout_s: 3600 },
+  // как в bbc-agent для локального сервера (vLLM): 8 параллельных вызовов, пакет 5
+  local: { min_interval_s: 0, concurrency: 8, max_attempts: 5, batch_size: 5, run_timeout_s: 3600 },
 }
 
 function NumberField({

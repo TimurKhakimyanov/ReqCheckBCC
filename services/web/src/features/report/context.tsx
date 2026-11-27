@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { Finding, FindingReview, Report } from '@/api/types'
+import type { Finding, FindingReview, Report, Run } from '@/api/types'
 
 export type ReportTab = 'findings' | 'summary' | 'questions' | 'requirements' | 'matrix' | 'set' | 'checklist' | 'passport'
 
@@ -14,6 +14,8 @@ export interface Selection {
 
 export interface ReportCtx {
   runId: string
+  /** Прогон отчёта: документ, провайдер, модель и параметры — для перепроверки с ответами автора */
+  run: Run
   report: Report
   findingsById: Record<string, Finding>
   reviews: Record<string, FindingReview>

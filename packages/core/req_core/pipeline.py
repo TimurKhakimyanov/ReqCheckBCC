@@ -50,11 +50,15 @@ class Progress:
 
 
 def run_pipeline(doc: ParsedDocument, client: Any, *, options: ValidationOptions | None = None,
-                 on_progress: ProgressCallback | None = None, provider: str = "", model: str = "") -> Report:
+                 on_progress: ProgressCallback | None = None, provider: str = "", model: str = "",
+                 interactive: bool = False, ask_author: Any = None) -> Report:
+    """interactive — задать уточняющие вопросы в консоли и учесть ответы в этом же прогоне (CLI --ask).
+    ask_author — то же для веба: callable(вопросы) → {Q-01: ответ}; вызывается при options.ask_author."""
     progress = Progress(on_progress)
     try:  # клиент LLM сообщает о паузах перед повтором (429) — пробрасываем как heartbeat прогресса
         client.on_wait = progress.heartbeat
     except AttributeError:
         pass
     return run_agents(doc, client, options or ValidationOptions(), progress,
-                      provider or getattr(client, "provider", ""), model or getattr(client, "model", ""))
+                      provider or getattr(client, "provider", ""), model or getattr(client, "model", ""), interactive,
+                      ask_author)

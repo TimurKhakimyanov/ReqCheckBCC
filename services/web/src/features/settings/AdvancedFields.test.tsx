@@ -76,7 +76,7 @@ describe('Advanced provider parameters', () => {
     renderWithProviders(<SettingsPage />)
     const dialog = await openParams(user)
     const timeout = within(dialog).getByLabelText('Таймаут запроса, с')
-    expect(timeout).toHaveAttribute('placeholder', '180')
+    expect(timeout).toHaveAttribute('placeholder', '600')
     await user.type(timeout, '5')
     expect(within(dialog).getByText('Целое число от 10 до 3600')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: /Далее/ })).toBeDisabled()

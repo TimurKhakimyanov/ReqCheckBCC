@@ -32,8 +32,10 @@ class AppSettings(BaseModel):
     run_timeout_s: int = Field(default=1800, ge=60, le=MAX_RUN_TIMEOUT_S)
     min_interval_s: float = Field(default=0.0, ge=0, le=120)
     max_attempts: int = Field(default=6, ge=1, le=20)
-    batch_size: int = Field(default=6, ge=1, le=50)
-    concurrency: int = Field(default=1, ge=1, le=16)
+    # как в bbc-agent: пакет инспектора 5 требований; 8 параллельных вызовов — рекомендация для локального сервера (vLLM).
+    # Бесплатному Gemini нужен 1 — пресет «Бесплатный Gemini» в «Параметрах ИИ».
+    batch_size: int = Field(default=5, ge=1, le=50)
+    concurrency: int = Field(default=8, ge=1, le=16)
     # эмбеддинги (ключ — отдельной зашифрованной колонкой)
     embeddings_provider: EmbeddingsProvider = "local"
     embeddings_model: str | None = None

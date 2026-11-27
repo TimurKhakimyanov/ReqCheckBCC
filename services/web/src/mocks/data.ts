@@ -14,6 +14,7 @@ import type {
   RunStage,
   User,
 } from '@/api/types'
+import { isTerminal } from '@/api/types'
 import { seedNotes, type MockNote } from './wiki'
 
 /** Как сейчас приходит от бэкенда: сырой текст исключения SDK. Веб показывает его в «Подробностях». */
@@ -45,11 +46,27 @@ const PLAN: { stage: RunStage; ms: number; message: string }[] = [
   { stage: 'rendering', ms: 600, message: 'Сводка и выгрузки' },
 ]
 const TOTAL_MS = PLAN.reduce((s, p) => s + p.ms, 0)
+/** Где прогон с ask_author останавливается на вопросах: после верификатора, перед итогом — как ядро */
+const ASK_AT_MS = PLAN.slice(0, PLAN.findIndex((p) => p.stage === 'rendering')).reduce((s, p) => s + p.ms, 0)
 
 interface MockRun extends Run {
   _startedAtMs: number
   _cancelled?: boolean
   _failAt?: RunStage
+  /** Когда прогон остановился на вопросах автору (ask_author); null — не ждёт */
+  _askedAt?: number | null
+  /** Ответы автора, полученные по ходу прогона */
+  _answers?: Record<string, string>
+}
+
+/** Прогон стоит на вопросах и ждёт ответов автора */
+export const isAsking = (run: MockRun) => run._askedAt != null && !isTerminal(run.status)
+
+/** Ответы автора ждущему прогону: прогон продолжается с места остановки */
+export function answerRun(run: MockRun, answers: Record<string, string>) {
+  run._answers = answers
+  run._startedAtMs += Date.now() - (run._askedAt ?? Date.now())
+  run._askedAt = null
 }
 
 export interface Db {
@@ -176,8 +193,8 @@ function seed(): Db {
       run_timeout_s: 1800,
       min_interval_s: 0,
       max_attempts: 6,
-      batch_size: 6,
-      concurrency: 1,
+      batch_size: 5,
+      concurrency: 8,
       embeddings_provider: 'local',
       embeddings_model: null,
       embeddings_dim: null,
@@ -205,6 +222,12 @@ export function progressOf(run: MockRun): ProgressEvent {
     return { run_id: run.id, stage: run.status, progress: run.progress, message: run.error ?? run.message ?? '', ts: run.finished_at ?? now() }
   }
   const elapsed = Date.now() - run._startedAtMs
+  const asks = run.options.ask_author && run.options.ask_questions !== false && (sampleReport.questions?.length ?? 0) > 0
+  if (asks && run._answers === undefined && elapsed >= ASK_AT_MS) {
+    run._askedAt ??= Date.now()
+    const n = sampleReport.questions!.length
+    return { run_id: run.id, stage: 'verifying', progress: ASK_AT_MS / TOTAL_MS, message: `Ждём ответов автора: вопросов ${n}`, ts: now() }
+  }
   let acc = 0
   for (const step of PLAN) {
     if (elapsed < acc + step.ms) {
@@ -230,6 +253,32 @@ export function progressOf(run: MockRun): ProgressEvent {
   return finish(run, 'done')
 }
 
+/** Как «Редактор по ответам» ядра: отвеченный вопрос получает ответ, новую формулировку первого связанного
+ *  требования и закрывает первый связанный дефект (Finding.resolved_by). */
+export function withAnswers(report: Report, answers: Record<string, string>): Report {
+  const ids = Object.keys(answers).filter((k) => answers[k]?.trim())
+  if (!ids.length) return report
+  const closed: Record<string, string> = {}
+  const questions = (report.questions ?? []).map((q) => {
+    const answer = answers[q.id]?.trim()
+    if (!answer) return q
+    const closes = (q.finding_ids ?? []).slice(0, 1)
+    const reqId = q.requirement_ids?.[0] ?? report.findings.find((f) => f.id === closes[0])?.requirement_ids?.[0]
+    const req = report.requirements.find((r) => r.id === reqId)
+    closes.forEach((f) => (closed[f] = q.id))
+    return {
+      ...q,
+      answer,
+      resolution: {
+        rewrites: req ? [{ requirement_id: req.id, new_text: `${req.summary.replace(/\.\s*$/, '')} — ${answer}.` }] : [],
+        closes_findings: closes,
+        note: 'Формулировка уточнена по ответу автора.',
+      },
+    }
+  })
+  return { ...report, questions, findings: report.findings.map((f) => (closed[f.id] ? { ...f, resolved_by: closed[f.id] } : f)) }
+}
+
 function finish(run: MockRun, status: 'done' | 'failed', error?: string): ProgressEvent {
   run.status = status
   run.stage = status
@@ -240,11 +289,14 @@ function finish(run: MockRun, status: 'done' | 'failed', error?: string): Progre
   run.usage = { llm_calls: 12, prompt_tokens: 41000, completion_tokens: 8300, cost_usd: 0.027, duration_s: TOTAL_MS / 1000 }
   if (status === 'done') {
     run.summary = { ...sampleReport.summary, ready_for_development: sampleReport.conclusion.ready_for_development }
-    db.reports[run.id] = {
-      ...sampleReport,
-      passport: { ...sampleReport.passport, document_name: run.document_name, provider: run.provider, model: run.model, run_at: run.created_at, agent_version: 'mock' },
-      usage: run.usage,
-    }
+    db.reports[run.id] = withAnswers(
+      {
+        ...sampleReport,
+        passport: { ...sampleReport.passport, document_name: run.document_name, provider: run.provider, model: run.model, run_at: run.created_at, agent_version: 'mock' },
+        usage: run.usage,
+      },
+      run._answers ?? run.options.answers ?? {},
+    )
   }
   const doc = db.documents.find((d) => d.id === run.document_id)
   if (doc) doc.last_run = { id: run.id, status, progress: run.progress, created_at: run.created_at, finished_at: run.finished_at, summary: run.summary }

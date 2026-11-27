@@ -6,14 +6,20 @@
   - повтор с пояснением, если ответ не разобрался как JSON;
   - фрагменты базы знаний (RAG) в системный промт;
   - отмена прогона и фатальные ошибки провайдера (ключ, модель) — как BaseException, чтобы их не
-    проглотили `except Exception` внутри агентов (там они означают «этот интент не удался, повторим»).
+    проглотили `except Exception` внутри агентов (там они означают «этот интент не удался, повторим»);
+  - кэш ответов модели, как в bbc-agent: каталог из переменной LLM_CACHE_DIR, ключ — провайдер, адрес, модель,
+    температура, параметры запроса, системный промпт и запрос. Повторный прогон того же документа с теми же
+    настройками берёт ответы из кэша и проходит за секунды; изменение модели, промпта или базы знаний — новый ключ.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import threading
+from pathlib import Path
 from typing import Any
 
 from .budget import Budget
@@ -112,6 +118,11 @@ def detect_window(client: Any) -> tuple[int, str]:
     cfg = getattr(client, "cfg", None)
     if cfg is not None and getattr(cfg, "context_tokens", None):
         return int(cfg.context_tokens), "настройки провайдера"
+    ask = getattr(client, "server_context_window", None)
+    if ask is not None:  # как в bbc-agent: vLLM отдаёт max_model_len, Gemini — лимиты модели
+        n = ask()
+        if n:
+            return int(n), "сообщил сервер"
     provider = str(getattr(getattr(cfg, "provider", None), "value", getattr(cfg, "provider", "")) or "")
     model = (getattr(client, "model", "") or "").lower()
     if provider == "anthropic" or model.startswith("claude"):
@@ -148,8 +159,46 @@ class AgentLLM:
         self.knowledge = [k.strip() for k in (knowledge or []) if k and k.strip()]
         self.progress = progress
         self.on_activity = on_activity or (lambda rec: None)
-        self.tokens_in = self.tokens_out = self.calls = 0
+        self.tokens_in = self.tokens_out = self.calls = self.cache_hits = 0
         self._lock = threading.Lock()
+        cache = (os.getenv("LLM_CACHE_DIR") or "").strip()
+        self.cache_dir = Path(cache) if cache and getattr(client, "cfg", None) is not None else None
+
+    # --- кэш ответов (validator/llm.py bbc-agent: _cache_key, _cache_get, _cache_put)
+    def _cache_key(self, role: str, system: str, user: str) -> str:
+        cfg = self.client.cfg
+        body = getattr(cfg, "extra_body_set_review", None) if role == "reviewer" else None
+        extra = body if body is not None else (getattr(cfg, "extra_body", None) or {})
+        h = hashlib.sha256()
+        provider = str(getattr(cfg.provider, "value", cfg.provider))
+        for part in (provider, cfg.base_url or "", getattr(self.client, "model", ""), str(cfg.temperature),
+                     json.dumps(extra, sort_keys=True, ensure_ascii=False), system, user):
+            h.update(part.encode("utf-8"))
+            h.update(b"\x00")
+        return h.hexdigest()
+
+    def _cache_get(self, key: str) -> dict | None:
+        if self.cache_dir is None:
+            return None
+        p = self.cache_dir / f"{key}.json"
+        try:
+            val = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return val if isinstance(val, dict) and val.get("_v") == 2 and "data" in val else None
+
+    def _cache_put(self, key: str, data: Any, t_in: int, t_out: int) -> None:
+        if self.cache_dir is None:
+            return
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            # через временный файл: параллельные прогоны не увидят наполовину записанный ответ
+            tmp = self.cache_dir / f"{key}.{threading.get_ident()}.tmp"
+            tmp.write_text(json.dumps({"_v": 2, "data": data, "usage": {"in": t_in, "out": t_out}}, ensure_ascii=False),
+                           encoding="utf-8")
+            os.replace(tmp, self.cache_dir / f"{key}.json")
+        except OSError:
+            pass  # кэш — ускорение, не обязательная часть прогона
 
     def _system(self, role: str, system: str) -> str:
         if not self.knowledge or role not in KB_ROLES:
@@ -185,6 +234,17 @@ class AgentLLM:
         who = f"{role}/{label}" if label else role
         name = prompt or role
         est = self.budget.check(system, user, who)
+        key = self._cache_key(role, system, user) if self.cache_dir is not None else ""
+        cached = self._cache_get(key) if key else None
+        if cached is not None:
+            usage = cached.get("usage") or {}
+            with self._lock:
+                self.cache_hits += 1
+            self.budget.observe(len(system) + len(user), int(usage.get("in", 0) or 0), who)
+            self.on_activity({"kind": "llm_call", "agent": role, "label": label, "prompt": name, "cached": True,
+                              "tokens_in": int(usage.get("in", 0) or 0), "tokens_out": int(usage.get("out", 0) or 0),
+                              "est": est, "attempt": 0, "truncated": False})
+            return cached["data"]
         limit = min(max_tokens or self.max_output, self.budget.output_reserve)
         text_prompt = user
         last_err = ""
@@ -216,13 +276,19 @@ class AgentLLM:
                     raise LLMTruncated(last_err, reply.text)
                 partial = salvage_json(reply.text)
                 if isinstance(partial, (dict, list)) and partial and len(reply.text) > 2_000:
+                    if key:
+                        self._cache_put(key, partial, t_in, t_out)
                     return partial  # модель выдала много целых элементов и оборвалась на очередном
                 limit = min(limit * 2, max(self.budget.window - est - 512, limit))
                 continue
             try:
-                return parse_json(reply.text)
+                data = parse_json(reply.text)
             except (ValueError, json.JSONDecodeError) as e:
                 last_err = str(e)
                 text_prompt = (user + "\n\nВАЖНО: предыдущий ответ не удалось разобрать как JSON (" + last_err
                                + "). Верни ТОЛЬКО валидный JSON по заданной схеме, без пояснений и без ```.")
+                continue
+            if key:
+                self._cache_put(key, data, t_in, t_out)
+            return data
         raise LLMError(f"[{who}] не удалось получить JSON за 3 попытки: {last_err}")

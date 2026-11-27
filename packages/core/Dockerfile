@@ -16,5 +16,6 @@ RUN printf '%s' "$AGENT_VERSION" > /etc/reqcheck-agent-version
 
 FROM base AS test
 COPY samples samples
+COPY run.py run.py
 WORKDIR /repo/packages/core
 CMD ["pytest", "-q"]

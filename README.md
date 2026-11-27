@@ -11,15 +11,72 @@
 <!-- ===================== Раздел сессии «Ядро» ===================== -->
 ## Быстрый прогон агента (CLI)
 
+### Одной командой, как в bbc-agent: `python run.py`
+
+```powershell
+python -m venv .venv
+```
+
+```powershell
+.venv\Scripts\pip install -e packages/contracts -e packages/core
+```
+
+```powershell
+.venv\Scripts\python run.py samples/requirements.md reports/report.pdf
+```
+
+Настройки модели — те же переменные, что в bbc-agent, в файле `.env` текущей папки или в файле из `--env`.
+Можно взять готовый `.env` от bbc-agent: `--env путь\к\bbc-agent\.env`. Флаги важнее переменных, уже заданные
+переменные окружения важнее файла.
+
+| Переменная | Что задаёт |
+| :--- | :--- |
+| `LLM_PROVIDER` | `gemini`, `openai` (с `OPENAI_BASE_URL` не на api.openai.com — любой OpenAI-совместимый сервер: vLLM, LM Studio), `ollama`, `anthropic` |
+| `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_API_KEY` | OpenAI-совместимый сервер, модель и ключ (для vLLM без авторизации ключ не нужен) |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` · `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Gemini · Ollama |
+| `LLM_CONCURRENCY` | параллельных вызовов: локальный сервер — 8, бесплатный Gemini — 1 |
+| `AGENT_BATCH_SIZE` | требований на один вызов инспектора (5) |
+| `LLM_MAX_TOKENS`, `LLM_TIMEOUT`, `LLM_MIN_INTERVAL`, `LLM_MAX_RETRIES`, `LLM_TEMPERATURE` | лимит ответа, таймаут вызова (600 с), пауза между вызовами, повторы при 429/5xx, температура (0) |
+| `LLM_CONTEXT_TOKENS` | окно модели; по умолчанию его сообщает сервер (vLLM — `max_model_len`) |
+| `LLM_EXTRA_BODY`, `LLM_EXTRA_BODY_REVIEWER` | доп. параметры запроса для всех ролей и для рецензентов набора (JSON) |
+| `LLM_CACHE_DIR` | кэш ответов модели (`.cache/llm`): повторный прогон того же документа с теми же настройками — за секунды |
+
+Своя модель или лимит на отдельную роль (`MODEL_<РОЛЬ>`, `LLM_MAX_TOKENS_<РОЛЬ>`) и `LLM_TRUNCATION_FALLBACK_BODY`
+в Zoe не поддерживаются — агент предупредит, если они заданы.
+
+Ключи как в bbc-agent:
+
+| Ключ | Что делает |
+| :--- | :--- |
+| `--ask` | задать уточняющие вопросы в консоли (номер варианта или свой текст; Enter — пропустить, `q` — закончить) и учесть ответы в этом же отчёте |
+| `--answers FILE` | ответы файлом: впишите их в поле `answer` файла `<отчёт>.questions.json` прошлого прогона |
+| `--max-questions N` | максимум вопросов: от 1 до 6 (5) |
+| `--no-cache` | не использовать кэш ответов модели |
+| `--env FILE` | файл с переменными (по умолчанию `.env`, если есть) |
+| `--quiet`, `--version` | без хода работы; версия агента |
+
+```powershell
+.venv\Scripts\python run.py doc.pdf reports/report.md --ask
+```
+
+```powershell
+.venv\Scripts\python run.py doc.pdf reports/report.md --answers reports/report.questions.json
+```
+
+Рядом с отчётом создаются `report.pdf` и `report.questions.json` (вопросы автору — для `--answers`).
+Остальные флаги — ниже и в `python run.py --help`. То же самое без Python — в Docker:
+
+### В Docker
+
 Агент принимает путь к документу требований (PDF, DOCX, MD, TXT) и путь к файлу отчёта. Нужен только Docker.
 
 **1. Ключ LLM.** Бесплатный ключ Gemini: [aistudio.google.com](https://aistudio.google.com/) → *Get API key* →
 *Create API key*. Для бесплатного тарифа достаточно. Для локальной модели (vLLM, Ollama) ключ не нужен.
 
 **2. Куда положить.** Никуда: ключ передаётся при запуске — переменной окружения (`-e GEMINI_API_KEY=...`)
-или флагом `--api-key`. Файл `.env` для LLM не используется (в нём только пароли инфраструктуры; он нужен
-docker compose, поэтому один раз выполните `Copy-Item .env.example .env`). В веб-интерфейсе ключи и параметры
-ИИ задаются в админке.
+или флагом `--api-key`. В Docker файл `.env` для LLM не используется (в нём только пароли инфраструктуры; он нужен
+docker compose, поэтому один раз выполните `Copy-Item .env.example .env`); `python run.py` читает переменные
+bbc-agent (см. выше). В веб-интерфейсе ключи и параметры ИИ задаются в админке.
 
 **3. Запуск одной командой.** Положите документ в каталог `data/` и выполните:
 

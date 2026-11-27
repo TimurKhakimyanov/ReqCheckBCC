@@ -54,6 +54,7 @@ NO_KEY_PLACEHOLDER = "ollama"  # OpenAI SDK требует непустой кл
 MODES = ("native", "tool", "prompt")
 _CAPS: dict[tuple[str, str, str], str] = {}  # (провайдер, base_url, модель) → первый рабочий режим JSON
 _CAPS_LOCK = threading.Lock()
+_WINDOWS: dict[tuple[str, str, str], int | None] = {}  # (провайдер, base_url, модель) → окно от сервера
 TOOL_NAME = "submit_result"
 
 
@@ -271,6 +272,25 @@ class BaseLLM:
 
     def max_tokens(self) -> int | None:
         return self.cfg.max_output_tokens or DEFAULT_MAX_TOKENS.get(self.cfg.provider)
+
+    def server_context_window(self) -> int | None:
+        """Окно модели (вход + выход), как его сообщает сервер; None — не сообщил. Как detect_window в bbc-agent:
+        vLLM и совместимые отдают max_model_len в /v1/models, Gemini — inputTokenLimit + outputTokenLimit."""
+        key = self._cap_key()
+        with _CAPS_LOCK:
+            if key in _WINDOWS:
+                return _WINDOWS[key]
+        try:
+            n = self._ask_context_window()
+        except Exception as e:  # noqa: BLE001 — сервер не обязан это уметь
+            log.info("Окно модели %s не узнать у сервера: %s", self.model, e)
+            n = None
+        with _CAPS_LOCK:
+            _WINDOWS[key] = n
+        return n
+
+    def _ask_context_window(self) -> int | None:
+        return None
 
     def _cap_key(self) -> tuple[str, str, str]:
         return (self.cfg.provider.value, self.cfg.base_url or "", self.model)
@@ -492,6 +512,11 @@ class GeminiLLM(BaseLLM):
             http["base_url"] = cfg.base_url
         self.client = genai.Client(api_key=key, http_options=types.HttpOptions(**http))
 
+    def _ask_context_window(self) -> int | None:
+        m = self.client.models.get(model=self.model)
+        n = int(getattr(m, "input_token_limit", 0) or 0)
+        return n + int(getattr(m, "output_token_limit", 0) or 0) if n > 0 else None
+
     def _contents(self, messages: list[dict[str, str]]):
         t = self._types
         return [
@@ -588,6 +613,18 @@ class OpenAILLM(BaseLLM):
             key = NO_KEY_PLACEHOLDER
         self.client = OpenAI(api_key=key, base_url=cfg.base_url, timeout=cfg.timeout_s, max_retries=0)
         self._use_temperature = True
+
+    def _ask_context_window(self) -> int | None:
+        if not self.compatible:  # api.openai.com размер окна не отдаёт — оценка по модели в agent/llm.py
+            return None
+        for m in self.client.with_options(timeout=8.0).models.list():
+            if m.id != self.model:
+                continue
+            extra = m.model_dump()
+            for k in ("max_model_len", "context_length", "context_window", "max_context_length"):
+                if isinstance(extra.get(k), int) and extra[k] > 0:
+                    return int(extra[k])
+        return None
 
     def _kwargs(self, system, messages, schema, mode, max_tokens):
         sys_text = system

@@ -24,7 +24,15 @@ from app.app_settings import AppSettings, load_row  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
 from app.models import Document, ProviderSetting, ReportRow, Run, RunLog  # noqa: E402
 from app.providers import set_api_key  # noqa: E402
-from app.services import run_cancel_key, run_events_channel, set_services  # noqa: E402
+import json  # noqa: E402
+
+from app.services import (  # noqa: E402
+    run_answers_key,
+    run_cancel_key,
+    run_events_channel,
+    run_questions_key,
+    set_services,
+)
 from app.vectors import REQUIREMENTS  # noqa: E402
 from req_contracts import ProgressEvent, Report, RunStage  # noqa: E402
 from sqlalchemy import select  # noqa: E402
@@ -53,13 +61,13 @@ def fake_render(monkeypatch):
     monkeypatch.setattr(req_core, "render_report", testing.fake_render_report)
 
 
-def make_run(svc, provider: str = "gemini") -> str:
+def make_run(svc, provider: str = "gemini", options: dict | None = None) -> str:
     doc_id = uuid.uuid4()
     key = f"documents/{doc_id}/requirements.md"
     svc.store.put(key, SAMPLE.document.text.encode())
     with SessionLocal() as db:
         db.add(Document(id=doc_id, name="requirements.md", format="md", size_bytes=1, sha256="x", s3_key=key))
-        run = Run(document_id=doc_id, provider=provider, model="gemini-2.5-flash", options={"verify_pass": True},
+        run = Run(document_id=doc_id, provider=provider, model="gemini-2.5-flash", options=options or {"verify_pass": True},
                   status="queued", stage="queued", progress=0.0, message="")
         db.add(run)
         db.commit()
@@ -371,3 +379,64 @@ def test_provider_timeout_reaches_core_and_extends_run_deadline(svc, monkeypatch
         with SessionLocal() as db:
             db.get(ProviderSetting, "gemini").timeout_s = None
             db.commit()
+
+
+def test_ask_author_waits_for_answers_from_the_web(svc, monkeypatch):
+    """Веб-аналог --ask: воркер выкладывает вопросы в Redis и ждёт ответы, которые кладёт API;
+    ожидание не входит в таймаут прогона."""
+    seen = {}
+
+    def validate(path, llm, *, options=None, on_progress=None, document_name=None, ask_author=None):
+        assert options.ask_author is True and ask_author is not None
+        on_progress(ProgressEvent(stage=RunStage.VERIFYING, progress=0.8, message="вопросы"))
+        seen["answers"] = ask_author(SAMPLE.questions)
+        return SAMPLE
+
+    monkeypatch.setattr(req_core, "validate_document", validate)
+    import worker.tasks as tasks
+
+    # таймаут прогона 1 с, а автор отвечает через 2 с — прогон не должен упасть по таймауту
+    monkeypatch.setattr(tasks, "read_app_settings", lambda: AppSettings.model_construct(run_timeout_s=1))
+    build = tasks.build_provider_config
+    monkeypatch.setattr(tasks, "build_provider_config",
+                        lambda *a, **k: build(*a, **k).model_copy(update={"timeout_s": 1.0}))
+    run_id = make_run(svc, options={"verify_pass": True, "ask_author": True})
+    q = SAMPLE.questions[0]
+
+    def answer_like_api():
+        for _ in range(50):
+            raw = svc.redis.get(run_questions_key(run_id))
+            if raw:
+                assert json.loads(raw)[0]["id"] == q.id
+                break
+            time.sleep(0.1)
+        assert "Ждём ответов автора" in get_run(run_id).message
+        time.sleep(2)
+        svc.redis.set(run_answers_key(run_id), json.dumps({q.id: q.options[0], "Q-09": ""}))
+
+    t = threading.Thread(target=answer_like_api)
+    t.start()
+    assert run_validation.delay(run_id).get() == "done"
+    t.join()
+    assert seen["answers"] == {q.id: q.options[0]}
+    assert svc.redis.get(run_questions_key(run_id)) is None  # вопросы убраны после ответа
+
+
+def test_ask_author_wait_is_cancellable(svc, monkeypatch):
+    def validate(path, llm, *, options=None, on_progress=None, document_name=None, ask_author=None):
+        ask_author(SAMPLE.questions)
+        return SAMPLE
+
+    monkeypatch.setattr(req_core, "validate_document", validate)
+    run_id = make_run(svc, options={"ask_author": True})
+
+    def cancel_like_api():
+        time.sleep(1.5)
+        svc.redis.set(run_cancel_key(run_id), "1")
+        with SessionLocal() as db:
+            run = db.get(Run, uuid.UUID(run_id))
+            run.status = run.stage = "cancelled"
+            db.commit()
+
+    threading.Thread(target=cancel_like_api).start()
+    assert run_validation.delay(run_id).get() == "cancelled"

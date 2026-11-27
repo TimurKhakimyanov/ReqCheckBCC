@@ -92,3 +92,13 @@ def run_events_channel(run_id: str) -> str:
 
 def run_cancel_key(run_id: str) -> str:
     return f"run:{run_id}:cancel"
+
+
+def run_questions_key(run_id: str) -> str:
+    """Вопросы автору, на которых прогон остановился и ждёт ответов (веб-аналог --ask bbc-agent)."""
+    return f"run:{run_id}:questions"
+
+
+def run_answers_key(run_id: str) -> str:
+    """Ответы автора {Q-01: ответ}, которые API кладёт для ждущего прогона; пустой объект — пропустить вопросы."""
+    return f"run:{run_id}:answers"

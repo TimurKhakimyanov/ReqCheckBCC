@@ -104,7 +104,9 @@
       "fill_checklist": "Fill in the review checklist",
       "fill_checklistHint": "If the document has a “Requirements review” checklist, the agent answers every item.",
       "ask_questions": "Clarifying questions for the author",
-      "ask_questionsHint": "The agent prepares closed questions with answer options — without the answers the requirements can be read differently."
+      "ask_questionsHint": "The agent prepares closed questions with answer options — without the answers the requirements can be read differently.",
+      "ask_author": "Ask me during the run",
+      "ask_authorHint": "Like --ask in bbc-agent: after the re-check the run stops at the questions for the author. Answers are applied in this same run — the agent rewrites requirements and closes resolved findings."
     }
   },
   "stage": {
@@ -275,7 +277,9 @@
     "groupDocument": "By document",
     "prevFinding": "Previous finding (↑)",
     "nextFinding": "Next finding (↓)",
-    "noSection": "No section"
+    "noSection": "No section",
+    "resolvedBy": "Closed by {{id}}",
+    "resolvedByHint": "The author's answer to a clarifying question closes this finding"
   },
   "passport": {
     "title": "Run passport",
@@ -745,7 +749,7 @@
       "paid_api": "Paid API",
       "paid_apiHint": "No pause, 4 workers, batches of 8 — fast",
       "local": "Local model",
-      "localHint": "1 worker, batches of 3, 4 attempts, 1 h run timeout — for a single GPU"
+      "localHint": "8 threads, batches of 5, 5 attempts, 1 h run timeout — as in bbc-agent for vLLM"
     },
     "resetTo": "Reset to default: {{value}}",
     "revert": "Discard changes",
@@ -757,7 +761,7 @@
     "concurrency": {
       "label": "Parallel requests",
       "unit": "",
-      "hint": "Paid APIs — 3–4, runs get several times faster. Free keys and a local model on one GPU — 1, otherwise 429 or queueing."
+      "hint": "Local server (vLLM) — 8, paid APIs — 4, free Gemini — 1, as in bbc-agent. Agents of one stage (the inspector and six reviewers, verifier batches) run at once — runs get several times faster."
     },
     "max_attempts": {
       "label": "Attempts per call",
@@ -950,7 +954,17 @@
     "customPlaceholder": "Your own answer",
     "noAnswer": "no answer",
     "answerChosen": "answer chosen",
-    "localNote": "Answers are kept in this browser — copy them to send to the author."
+    "rerun": "Re-check with answers",
+    "rerunHint": "Answers are kept in this browser. «Re-check with answers» starts a new run: an agent proposes new requirement wording and closes findings the answers resolve.",
+    "rerunNone": "Answer at least one question first",
+    "rerunStarted": "Run with answers started",
+    "rerunFailed": "Could not start the run with answers",
+    "appliedNote": "This report was built with the author's answers: {{n}} of {{total}} applied.",
+    "answerApplied": "Applied in the report",
+    "resolution": "What the answer changed",
+    "authorAnswer": "Author's answer",
+    "rewrites": "New wording",
+    "closes": "Closes findings"
   },
   "wiki": {
     "graphFolders": "Folders",
@@ -1185,7 +1199,7 @@
         "role": "Breaks the check into tasks (intents) for workers and makes sure the «requirement × criterion» matrix and all set reviews are closed.",
         "input": "Requirements from the graph",
         "output": "An intent queue: set reviews and inspection batches",
-        "how": "Queues set reviews first: they take longest and run in parallel with inspection.\nSplits requirements into batches by the «batch size» setting (6 by default).\nAfter each round it counts coverage: anything unchecked goes to the next round in batches half the size, up to 4 rounds.\nA failure or window overflow in one intent doesn't stop the run — its work moves to the next round."
+        "how": "Queues set reviews first: they take longest and run in parallel with inspection.\nSplits requirements into batches by the «batch size» setting (5 by default).\nAfter each round it counts coverage: anything unchecked goes to the next round in batches half the size, up to 4 rounds.\nA failure or window overflow in one intent doesn't stop the run — its work moves to the next round."
       },
       "inspector": {
         "name": "Requirement inspector",
@@ -1260,7 +1274,7 @@
         "short": "questions for the author",
         "role": "From confirmed critical and major findings, prepares questions for the author: closed, with answer options, an addressee and a priority.",
         "input": "Confirmed findings and questions suggested by the inspector and reviewers",
-        "output": "Up to 15 questions Q-01… linked to findings",
+        "output": "1 to 5 questions Q-01… (6 at most) linked to findings",
         "how": "With many findings the request shrinks step by step (80, 50, 30… findings) until it fits the window.\nPriority: blocker, important, nice to have; addressee: analyst, product owner, architect, security and others.\nRuns at the same time as the checklist. Turned off with the «Questions for the author» option."
       },
       "checklist": {
@@ -1277,7 +1291,7 @@
         "role": "When the author has answered the questions, proposes corrected requirement wording and marks which findings this closes.",
         "input": "Questions Q-… with the author's answers and the linked findings",
         "output": "New requirement wording and the list of closed findings",
-        "how": "Runs on a repeat run with answers (the answers option in the API or --answers in the CLI).\nAn answered question is closed and no longer affects the verdict.\nA failure of this step doesn't stop the run and goes into the report warnings."
+        "how": "Runs in the same run when «Ask me during the run» is on at launch (like --ask in bbc-agent), or on a repeat run with answers (the «Re-check with answers» button, --answers in the CLI).\nAn answered question is closed and no longer affects the verdict.\nA failure of this step doesn't stop the run and goes into the report warnings."
       },
       "conclusion": {
         "name": "Verdict",
@@ -1328,7 +1342,7 @@
       },
       "parallel": {
         "title": "Parallel where possible",
-        "text": "The inspector and six reviewers work at the same time; so do verifier batches, questions and the checklist. The number of threads is the concurrency setting."
+        "text": "The inspector and six reviewers work at the same time; so do verifier batches, questions and the checklist. The number of threads is the concurrency setting (8 by default)."
       },
       "progress": {
         "title": "Live progress",
@@ -1375,6 +1389,36 @@
         "title": "In the report",
         "text": "The defect feeds questions for the author, the checklist, the verdict and the chat."
       }
+    },
+    "speedTitle": "Speed without losing quality",
+    "speedHint": "Agents are launched as in bbc-agent: the same prompts and checks, less waiting.",
+    "speed": {
+      "window": {
+        "title": "Model window from the server",
+        "text": "Agents ask the server for the window size (vLLM reports max_model_len, Gemini its model limits). The whole document fits in a request, reviewers see all of it, and answers aren't cut at 16,000 tokens."
+      },
+      "parallel": {
+        "title": "8 calls at once",
+        "text": "For a local server, 8 parallel calls: the inspector and six reviewers run together, and so do verifier batches. Questions and the checklist always run in parallel. Free Gemini needs 1 (preset in AI parameters)."
+      },
+      "cache": {
+        "title": "Model answer cache",
+        "text": "Re-running the same document with the same model, prompts and knowledge base takes answers from the cache and finishes in seconds. Any change means a new key and a fresh model answer."
+      },
+      "limits": {
+        "title": "Headroom for answers and time",
+        "text": "A 32,000-token answer limit (including model reasoning), a 600 s call timeout and inspector batches of 5 requirements, as in bbc-agent, so long answers aren't cut and retried."
+      }
     }
+  },
+  "ask": {
+    "title": "The agent is waiting for your answers",
+    "hint": "The run stopped at clarifying questions. Answer them and they will be applied in this same report: requirements get rewritten and resolved findings closed. You can skip some.",
+    "send": "Send answers",
+    "skip": "Skip questions",
+    "sent": "Answers sent — the run continues",
+    "skipped": "Questions skipped — the run continues",
+    "failed": "Could not send the answers",
+    "answered": "{{n}} of {{total}} answered"
   }
 }

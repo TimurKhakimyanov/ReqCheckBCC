@@ -13,7 +13,8 @@ import redis.asyncio as aioredis
 import req_core
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
-from req_contracts import ProgressEvent, Report, RunStage, ValidationOptions
+from pydantic import BaseModel, Field
+from req_contracts import ClarifyingQuestion, ProgressEvent, Report, RunStage, ValidationOptions
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import joinedload
 from starlette.concurrency import run_in_threadpool
@@ -39,7 +40,7 @@ from ..schemas import (
     RunOut,
 )
 from ..serialize import TERMINAL, run_out
-from ..services import run_cancel_key, run_events_channel
+from ..services import run_answers_key, run_cancel_key, run_events_channel, run_questions_key
 from ..vectors import REQUIREMENTS
 from .documents import content_disposition
 from .system import audit_entry
@@ -165,6 +166,41 @@ def cancel_run(run_id: str, request: Request, user: CurrentUser, db: DB, svc: Sv
     run = get_run(db, run_id)
     cancel_run_row(db, svc, run, user.username, request)
     return run_out(run)
+
+
+# ---------------- Вопросы автору по ходу прогона (веб-аналог --ask bbc-agent) ----------------
+
+class PendingQuestions(BaseModel):
+    waiting: bool = Field(description="Прогон остановился на вопросах и ждёт ответов автора")
+    questions: list[ClarifyingQuestion] = Field(default_factory=list)
+
+
+class AuthorAnswers(BaseModel):
+    answers: dict[str, str] = Field(default_factory=dict, description="{Q-01: ответ}; пустой объект — пропустить вопросы")
+
+
+@router.get("/{run_id}/questions", response_model=PendingQuestions, responses={404: {"model": ErrorOut}})
+def pending_questions(run_id: str, _: CurrentUser, db: DB, svc: Svc) -> PendingQuestions:
+    run = get_run(db, run_id)
+    raw = svc.redis.get(run_questions_key(str(run.id))) if run.status not in TERMINAL else None
+    if not raw:
+        return PendingQuestions(waiting=False)
+    return PendingQuestions(waiting=True, questions=[ClarifyingQuestion.model_validate(q) for q in json.loads(raw)])
+
+
+@router.post("/{run_id}/answers", response_model=PendingQuestions, status_code=202,
+             responses={404: {"model": ErrorOut}, 409: {"model": ErrorOut}})
+def send_answers(run_id: str, body: AuthorAnswers, request: Request, user: CurrentUser, db: DB, svc: Svc) -> PendingQuestions:
+    run = get_run(db, run_id)
+    rid = str(run.id)
+    raw = svc.redis.get(run_questions_key(rid)) if run.status not in TERMINAL else None
+    if not raw:
+        raise ApiError(409, "not_waiting", "Прогон сейчас не ждёт ответов автора")
+    ids = {q["id"] for q in json.loads(raw)}
+    answers = {k: v.strip() for k, v in body.answers.items() if k in ids and v and v.strip()}
+    svc.redis.set(run_answers_key(rid), json.dumps(answers, ensure_ascii=False), ex=3600)
+    audit(db, user.username, "run_answers", rid, {"answered": sorted(answers), "asked": len(ids)}, request)
+    return PendingQuestions(waiting=False)
 
 
 @router.delete("/{run_id}", status_code=204, responses={404: {"model": ErrorOut}})

@@ -14,7 +14,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from req_contracts import (
     REQUIREMENT_CRITERIA,
@@ -183,10 +183,16 @@ def _reqcheck_hints(doc: Document) -> list[Hint]:
 # ---------------------------------------------------------------------------- прогон
 
 
+# Ответы автора по ходу прогона (веб-аналог --ask): получает вопросы, возвращает {Q-01: ответ}; пустой dict — пропустить
+AskAuthor = Callable[[list[ClarifyingQuestion]], dict[str, str]]
+
+
 class Run:
     def __init__(self, pd: ParsedDocument, client: Any, options: ValidationOptions, progress: Any,
-                 provider: str, model: str):
+                 provider: str, model: str, interactive: bool = False, ask: AskAuthor | None = None):
         self.pd = pd
+        self.interactive = interactive  # --ask: вопросы автору в консоли, как в bbc-agent
+        self.ask = ask  # то же для веба: вопросы уходят на экран прогона, ответы приходят обратно
         self.client = client
         self.options = options
         self.progress = progress
@@ -276,7 +282,7 @@ class Run:
             jobs.append(("clarifier", clarifier.ask, (ctx, opt.max_questions)))
         if opt.fill_checklist:
             jobs.append(("checklist", finalizer.checklist, (ctx,)))
-        if len(jobs) > 1 and ctx.cfg.concurrency > 1:  # два независимых вызова — параллельно
+        if len(jobs) > 1:  # два независимых вызова — параллельно, как в bbc-agent (при любой параллельности воркеров)
             with ThreadPoolExecutor(max_workers=2) as pool:
                 futs = [pool.submit(contextvars.copy_context().run, self._safe, n, f, *a) for n, f, a in jobs]
                 for fut in futs:
@@ -284,10 +290,13 @@ class Run:
         else:
             for n, f, a in jobs:
                 self._safe(n, f, *a)
-        if opt.answers:
-            answers = {k.strip(): v.strip() for k, v in opt.answers.items() if k.strip() and v and v.strip()}
-            if answers:
-                self._safe("ответы автора", clarifier.resolve, ctx, answers)
+        answers = {k.strip(): v.strip() for k, v in opt.answers.items() if k.strip() and v and v.strip()}
+        if not answers and self.interactive:  # как run.py --ask в bbc-agent: спросить в консоли и учесть в этом же прогоне
+            answers = clarifier.interactive(ctx, opt.max_questions)
+        if not answers and self.ask is not None and opt.ask_author:  # то же из веба: ждём ответы с экрана прогона
+            answers = self._ask_author()
+        if answers:
+            self._safe("ответы автора", clarifier.resolve, ctx, answers)
 
         self.stage("verdict")
         self._safe("итог", finalizer.verdict, ctx)
@@ -299,6 +308,21 @@ class Run:
         self.progress(RunStage.DONE, 1.0,
                       f"Готово: требований {len(report.requirements)}, дефектов {len(report.findings)}")
         return report
+
+    def _ask_author(self) -> dict[str, str]:
+        """Вопросы в отчётном виде (как в разделе «Вопросы») → внешний обработчик → ответы только на эти вопросы."""
+        fids = {n.payload["fid"] for n in self.graph.of("finding", "confirmed") if n.payload.get("fid")}
+        order = {QuestionPriority.BLOCKER: 0, QuestionPriority.IMPORTANT: 1, QuestionPriority.MINOR: 2}
+        qs = sorted(self._questions(fids), key=lambda q: (order.get(q.priority, 1), q.id))[: self.options.max_questions]
+        if not qs:
+            return {}
+        self._emit(1.0, f"Ждём ответов автора: вопросов {len(qs)}")
+        raw = self.ask(qs) or {}
+        ids = {q.id for q in qs}
+        answers = {k.strip(): v.strip() for k, v in raw.items() if k.strip() in ids and v and v.strip()}
+        self.graph.log({"kind": "author_answers", "asked": len(qs), "answered": len(answers)})
+        self._emit(1.0, f"Ответов автора: {len(answers)} из {len(qs)}" if answers else "Вопросы пропущены — продолжаем без ответов")
+        return answers
 
     # --- сборка отчёта из графа
     def location(self, a: int, b: int, quote: str | None = None, score: float = 1.0) -> SourceLocation:
@@ -590,5 +614,5 @@ def _agent_version() -> str:
 
 
 def run_agents(pd: ParsedDocument, client: Any, options: ValidationOptions, progress: Any, provider: str,
-               model: str) -> Report:
-    return Run(pd, client, options, progress, provider, model).run()
+               model: str, interactive: bool = False, ask: AskAuthor | None = None) -> Report:
+    return Run(pd, client, options, progress, provider, model, interactive, ask).run()

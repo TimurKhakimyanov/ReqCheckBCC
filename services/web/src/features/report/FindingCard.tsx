@@ -93,6 +93,11 @@ export const FindingCard = forwardRef<HTMLDivElement, Props>(function FindingCar
             {t('report.sourceLlm')}
           </Badge>
         )}
+        {f.resolved_by && (
+          <Badge variant="success" title={t('report.resolvedByHint')}>
+            {t('report.resolvedBy', { id: f.resolved_by })}
+          </Badge>
+        )}
         {status !== 'open' && (
           <Badge variant={status === 'false_positive' ? 'warning' : 'success'} className="ml-auto">
             {t(`review.${status}`)}

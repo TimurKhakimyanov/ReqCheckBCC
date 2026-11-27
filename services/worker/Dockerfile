@@ -16,7 +16,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM base AS runtime
 ARG AGENT_VERSION=dev
 ENV AGENT_VERSION=${AGENT_VERSION} WORKER_METRICS_PORT=9101
-RUN useradd --system --uid 10001 --home /nonexistent app
+RUN useradd --system --uid 10001 --home /nonexistent app \
+    && mkdir -p /cache/llm && chown -R app /cache   # кэш ответов модели (том llm-cache)
 WORKDIR /repo/services/worker
 USER app
 EXPOSE 9101

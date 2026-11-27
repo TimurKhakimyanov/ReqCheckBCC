@@ -32,7 +32,7 @@ class ProviderConfig(BaseModel):
     max_output_tokens: int | None = Field(
         default=None, description="None — ядро выбирает с запасом (модели с рассуждениями тратят токены на reasoning)"
     )
-    timeout_s: float = 180.0
+    timeout_s: float = 600.0  # как LLM_TIMEOUT в bbc-agent: рассуждающая модель на длинном документе отвечает минутами
     context_tokens: int | None = Field(
         default=None, ge=1000, description="Окно модели в токенах; по умолчанию — оценка по провайдеру и модели"
     )
@@ -64,11 +64,15 @@ class ValidationOptions(BaseModel):
     split_compound: bool = Field(default=True, description="Показывать атомарные подтребования составных")
     fill_checklist: bool = Field(default=True, description="Заполнять чек-лист «Ревью требований» из документа")
     ask_questions: bool = Field(default=True, description="Готовить уточняющие вопросы автору документа")
-    max_questions: int = Field(default=15, ge=0, le=50, description="Не больше стольких вопросов")
+    max_questions: int = Field(default=5, ge=1, le=6, description="Не больше стольких вопросов автору: от 1 до 6, по умолчанию 5")
+    ask_author: bool = Field(
+        default=False,
+        description="Остановиться на вопросах и дождаться ответов автора в этом же прогоне (как --ask в bbc-agent)",
+    )
     knowledge_snippets: list[str] = Field(
         default_factory=list, description="Фрагменты базы знаний (RAG), которые воркер подмешивает в промпт"
     )
-    batch_size: int = Field(default=6, ge=1, description="Требований в одном запросе проверки")
+    batch_size: int = Field(default=5, ge=1, description="Требований в одном запросе проверки (AGENT_BATCH_SIZE bbc-agent)")
     concurrency: int = Field(default=1, ge=1, description="Параллельных запросов к модели")
     answers: dict[str, str] = Field(
         default_factory=dict,

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { api } from '@/api/client'
-import type { DocumentItem, ProviderId, ValidationOptions } from '@/api/types'
+import type { DocumentItem, LaunchOptions, ProviderId, ValidationOptions } from '@/api/types'
 import { DEFAULT_OPTIONS, isProviderConfigured } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -57,7 +57,12 @@ export function LaunchRunDialog({
   const usable = (providers.data ?? []).filter((p) => p.enabled)
   const [provider, setProvider] = useState<ProviderId | undefined>(last.provider)
   const [model, setModel] = useState<string>(last.model ?? '')
-  const [options, setOptions] = useState<Required<ValidationOptions>>({ ...DEFAULT_OPTIONS, ...last.options })
+  const [options, setOptions] = useState<LaunchOptions>(() => {
+    // ответы автора относятся к одному прогону — в новый запуск из этого окна они не переносятся
+    const saved: ValidationOptions = { ...last.options }
+    delete saved.answers
+    return { ...DEFAULT_OPTIONS, ...saved }
+  })
 
   // Провайдер по умолчанию: последний использованный, иначе из параметров ИИ, иначе первый настроенный.
   useEffect(() => {
@@ -95,7 +100,7 @@ export function LaunchRunDialog({
   })
 
   const noKey = current && !isProviderConfigured(current)
-  const opt = (k: keyof ValidationOptions) => (k === 'language' ? null : (
+  const opt = (k: keyof LaunchOptions) => (k === 'language' ? null : (
     <label key={k} className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/50">
       <Checkbox
         className="mt-0.5"
@@ -201,6 +206,7 @@ export function LaunchRunDialog({
               {opt('split_compound')}
               {opt('fill_checklist')}
               {opt('ask_questions')}
+              {options.ask_questions && opt('ask_author')}
             </div>
             {create.error && <ErrorNote error={create.error} />}
           </form>

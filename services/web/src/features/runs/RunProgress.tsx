@@ -14,6 +14,7 @@ import { cn } from '@/shared/utils'
 import { AgentCube, ConveyorScene, StackScene } from './AgentScene'
 import { AGENTS, agentRuntimes, formatClock, throughputPerMin, type AgentRuntime, type AgentState } from './agents'
 import { LaunchRunDialog } from './LaunchRunDialog'
+import { AskAuthorPanel } from './AskAuthorPanel'
 import { useRunEvents } from './useRunEvents'
 
 const STATE_COLOR: Record<AgentState, string> = {
@@ -173,6 +174,8 @@ export function RunProgress({ run }: { run: Run }) {
         </header>
 
         {failed && (run.error || message) && <ProviderErrorNote raw={run.error || message || ''} />}
+
+        <AskAuthorPanel run={run} active={running} />
 
         <div className="flex flex-wrap items-stretch gap-3">
           {/* Этапы-агенты */}

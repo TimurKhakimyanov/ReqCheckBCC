@@ -1,7 +1,10 @@
-import { Check, Copy, Minus, X } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Check, Copy, Minus, RefreshCw, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { CheckVerdict, ChecklistAnswer, CriterionCheck, QuestionPriority, Run, Severity } from '@/api/types'
+import { useNavigate } from 'react-router'
+import { api } from '@/api/client'
+import type { CheckVerdict, ChecklistAnswer, ClarifyingQuestion, CriterionCheck, QuestionPriority, Run, Severity } from '@/api/types'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -382,16 +385,26 @@ const PRIORITY_TONE: Record<QuestionPriority, string> = {
 }
 
 type Answers = Record<string, { choice?: number; custom?: string }>
+/** Параметры, которые берутся из текущих настроек, а не из прогона, с которого перепроверяем */
+const RUN_TUNING = ['batch_size', 'concurrency', 'knowledge_snippets', 'answers']
 
-/** Ответы автора хранятся в этом браузере; чтобы переслать их, есть кнопка «Скопировать ответы». */
-function useAnswers(runId: string) {
+/** Черновик ответов хранится в этом браузере; «Перепроверить с ответами» отправляет их агентам новым прогоном.
+ *  Если отчёт уже построен с ответами автора, они — начальные значения. */
+function useAnswers(runId: string, items: ClarifyingQuestion[]) {
   const key = `reqcheck.answers.${runId}`
   const [answers, setAnswers] = useState<Answers>(() => {
+    let saved: Answers = {}
     try {
-      return JSON.parse(localStorage.getItem(key) ?? '{}') as Answers
+      saved = JSON.parse(localStorage.getItem(key) ?? '{}') as Answers
     } catch {
-      return {}
+      /* хранилище недоступно */
     }
+    for (const q of items) {
+      if (!q.answer || saved[q.id]) continue
+      const k = q.options?.indexOf(q.answer) ?? -1
+      saved[q.id] = k >= 0 ? { choice: k } : { custom: q.answer }
+    }
+    return saved
   })
   useEffect(() => {
     try {
@@ -405,9 +418,27 @@ function useAnswers(runId: string) {
 
 export function QuestionsTab() {
   const { t } = useTranslation()
-  const { report, runId } = useReport()
+  const { report, runId, run, goToRequirement } = useReport()
   const items = useMemo(() => report.questions ?? [], [report.questions])
-  const [answers, setAnswers] = useAnswers(runId)
+  const [answers, setAnswers] = useAnswers(runId, items)
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  // Новый прогон того же документа той же моделью с теми же параметрами — плюс ответы автора.
+  // Агент «Редактор по ответам» предложит новые формулировки требований и снимет закрытые ответами дефекты.
+  const rerun = useMutation({
+    mutationFn: (map: Record<string, string>) => {
+      // флажки прогона — как у исходного; пакет и параллельность — из текущих «Параметров ИИ», а не из старого прогона
+      const flags = Object.fromEntries(Object.entries(run.options).filter(([k]) => !RUN_TUNING.includes(k)))
+      return api.createRun({ document_id: run.document_id, provider: run.provider, model: run.model, options: { ...flags, answers: map } })
+    },
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['documents'] })
+      void qc.invalidateQueries({ queryKey: ['runs'] })
+      toast.success(t('questions.rerunStarted'))
+      navigate(`/runs/${r.id}`)
+    },
+    onError: (e) => toast.error(t('questions.rerunFailed'), { description: e instanceof Error ? e.message : String(e) }),
+  })
   if (!items.length) return <EmptyState title={t('questions.empty')} hint={t('questions.emptyHint')} />
 
   const answerOf = (id: string): string | null => {
@@ -422,14 +453,23 @@ export function QuestionsTab() {
     navigator.clipboard?.writeText(text).then(() => toast.success(t('common.copied')))
   }
   const set = (id: string, v: { choice?: number; custom?: string }) => setAnswers((a) => ({ ...a, [id]: v }))
+  const applied = items.filter((q) => q.answer).length
+  const submit = () => {
+    const map: Record<string, string> = {}
+    for (const q of items) {
+      const a = answerOf(q.id)
+      if (a) map[q.id] = a
+    }
+    rerun.mutate(map)
+  }
 
   return (
     <div className="grid gap-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-3xl text-sm text-muted-foreground">
-          {t('questions.intro')} {t('questions.localNote')}
+          {t('questions.intro')} {t('questions.rerunHint')}
         </p>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm" aria-live="polite">
             {t('questions.answered', { n: answered, total: items.length })}
           </span>
@@ -437,8 +477,17 @@ export function QuestionsTab() {
             <Copy />
             {t('questions.copyAnswers')}
           </Button>
+          <Button size="sm" onClick={submit} disabled={!answered || rerun.isPending} title={answered ? undefined : t('questions.rerunNone')}>
+            <RefreshCw className={cn(rerun.isPending && 'animate-spin')} />
+            {t('questions.rerun')}
+          </Button>
         </div>
       </div>
+      {applied > 0 && (
+        <p className="rounded-xl bg-success/10 px-4 py-2.5 text-sm" role="status">
+          {t('questions.appliedNote', { n: applied, total: items.length })}
+        </p>
+      )}
       {items.map((q, i) => {
         const prio = q.priority ?? 'important'
         const a = answers[q.id] ?? {}
@@ -451,8 +500,8 @@ export function QuestionsTab() {
               <span className="text-muted-foreground">
                 {t('questions.addressee')}: <span className="text-foreground">{q.addressee}</span>
               </span>
-              <span className={cn('ml-auto font-sans', done ? 'text-success' : 'text-muted-foreground')}>
-                {done ? `✓ ${t('questions.answerChosen')}` : t('questions.noAnswer')}
+              <span className={cn('ml-auto font-sans', done || q.answer ? 'text-success' : 'text-muted-foreground')}>
+                {q.answer ? `✓ ${t('questions.answerApplied')}` : done ? `✓ ${t('questions.answerChosen')}` : t('questions.noAnswer')}
               </span>
             </div>
             <h3 className="text-[1.0625rem] leading-snug font-medium">{q.question}</h3>
@@ -500,6 +549,38 @@ export function QuestionsTab() {
                 <span className="label-mono">{t('questions.findings')}</span>
                 <FindingLinks ids={q.finding_ids} />
               </div>
+            )}
+            {q.answer && (
+              <section className="grid gap-2.5 rounded-xl bg-success/10 p-4 text-sm" aria-label={t('questions.resolution')}>
+                <p>
+                  <span className="label-mono mr-2">{t('questions.authorAnswer')}</span>
+                  {q.answer}
+                </p>
+                {(q.resolution?.rewrites?.length ?? 0) > 0 && (
+                  <div className="grid gap-1.5">
+                    <span className="label-mono">{t('questions.rewrites')}</span>
+                    {q.resolution!.rewrites!.map((rw) => (
+                      <p key={rw.requirement_id} className="flex gap-2">
+                        <button
+                          type="button"
+                          className="shrink-0 font-mono text-xs font-medium text-primary hover:underline"
+                          onClick={() => goToRequirement(rw.requirement_id)}
+                        >
+                          {rw.requirement_id}
+                        </button>
+                        <span>{rw.new_text}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {(q.resolution?.closes_findings?.length ?? 0) > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="label-mono">{t('questions.closes')}</span>
+                    <FindingLinks ids={q.resolution!.closes_findings} />
+                  </div>
+                )}
+                {q.resolution?.note && <p className="text-muted-foreground">{q.resolution.note}</p>}
+              </section>
             )}
           </article>
         )

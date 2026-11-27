@@ -86,7 +86,7 @@ standards), `document: ParsedDocument` (name, format, sha256, **text**, page_off
 | `extra_body_set_review` | `None` | переопределение `extra_body` только для проверки набора; `None` — как `extra_body` |
 
 **`ValidationOptions`**: `language="ru"`, `verify_pass=True` (верификатор), `split_compound=True`,
-`fill_checklist=True`, `ask_questions=True`, `max_questions=15`, `knowledge_snippets=[]` (RAG-фрагменты в промпт), `batch_size=6`, `concurrency=1`.
+`fill_checklist=True`, `ask_questions=True`, `max_questions=5` (1–6), `knowledge_snippets=[]` (RAG-фрагменты в промпт), `batch_size=6`, `concurrency=1`.
 
 ## 4. Публичный интерфейс ядра (`req_core/__init__.py`)
 

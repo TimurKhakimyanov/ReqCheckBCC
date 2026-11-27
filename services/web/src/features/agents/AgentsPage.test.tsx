@@ -51,5 +51,8 @@ describe('Agents page', () => {
     const matrix = screen.getByRole('table', { name: 'Кто за какие критерии отвечает' })
     expect(within(matrix).getByRole('img', { name: 'Контролёр логики правил: Непротиворечивость' })).toBeInTheDocument()
     expect(within(matrix).getAllByRole('img', { name: /^Инспектор требований:/ })).toHaveLength(9)
+    // как ускорен запуск: окно от сервера, 8 вызовов, кэш, лимиты — как в bbc-agent
+    expect(screen.getByRole('heading', { name: 'Скорость без потери качества' })).toBeInTheDocument()
+    expect(screen.getByText('Кэш ответов модели')).toBeInTheDocument()
   })
 })

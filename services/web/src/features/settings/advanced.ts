@@ -28,7 +28,7 @@ export const formatJson = (v: JsonObject | null | undefined) => (v ? JSON.string
 export const MAX_OUTPUT_TOKENS_LIMIT = 1_000_000
 
 /** Таймаут одного запроса к модели, с: по умолчанию и границы */
-export const TIMEOUT_DEFAULT_S = 180
+export const TIMEOUT_DEFAULT_S = 600 // как LLM_TIMEOUT в bbc-agent
 export const TIMEOUT_LIMITS = { min: 10, max: 3600 }
 
 /** vLLM (Qwen3 и др.): без рассуждений на обычных вызовах, с рассуждениями — на поиске противоречий в наборе. */

@@ -18,6 +18,7 @@ import type {
   KnowledgePatch,
   KnowledgeSearchHit,
   ModelsResponse,
+  PendingQuestions,
   Page,
   ProviderId,
   ProviderSettings,
@@ -176,6 +177,11 @@ export const api = {
   runLogs: (id: string) => request<RunLogs>(`/runs/${id}/logs`),
   createRun: (body: RunCreate) => request<Run>('/runs', { method: 'POST', json: body }),
   cancelRun: (id: string) => request<Run>(`/runs/${id}/cancel`, { method: 'POST' }),
+  /** Вопросы, на которых прогон ждёт ответов автора (веб-аналог --ask) */
+  runQuestions: (id: string) => request<PendingQuestions>(`/runs/${id}/questions`),
+  /** Ответы автора ждущему прогону; пустой объект — пропустить вопросы */
+  sendRunAnswers: (id: string, answers: Record<string, string>) =>
+    request<PendingQuestions>(`/runs/${id}/answers`, { method: 'POST', json: { answers } }),
   deleteRun: (id: string) => request<void>(`/runs/${id}`, { method: 'DELETE' }),
   runEventsUrl: (id: string) => `${API_BASE}/runs/${id}/events`,
   report: (id: string) => request<Report>(`/runs/${id}/report`),

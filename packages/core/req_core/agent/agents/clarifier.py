@@ -73,7 +73,7 @@ def ask(ctx: Ctx, limit: int = 20) -> None:
 
 
 # ----------------------------------------------------------------------------- ответы человека
-def interactive(ctx: Ctx, max_questions: int = 10) -> dict[str, str]:
+def interactive(ctx: Ctx, max_questions: int = 5) -> dict[str, str]:
     """Задаёт вопросы в консоли. Enter — пропустить, q — закончить."""
     qs = sorted(ctx.graph.of("question"), key=lambda q: (_PORDER[q.payload["priority"]], q.id))[:max_questions]
     answers: dict[str, str] = {}

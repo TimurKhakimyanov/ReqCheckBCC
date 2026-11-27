@@ -74,7 +74,7 @@ answer_question(report: Report, history: list[ChatMessage], question: str, llm: 
   (`LLMClient.complete_reply`), окно модели контролируется до вызова (`ProviderConfig.context_tokens`).
 - Схема отчёта 1.1 (изменение контракта): добавлено `Report.questions: [ClarifyingQuestion]` — `id` (`Q-01`),
   `question`, `why`, `addressee`, `priority` (blocker | important | minor), `finding_ids`, `options`. Поле
-  необязательное, отчёты 1.0 читаются без изменений. В `ValidationOptions` — `ask_questions=True`, `max_questions=15`,
+  необязательное, отчёты 1.0 читаются без изменений. В `ValidationOptions` — `ask_questions=True`, `max_questions=5` (1–6),
   `verify_pass` теперь по умолчанию `True`.
 - Схема отчёта 1.2 (изменение контракта, все поля необязательные — отчёты 1.1 читаются): у `Finding` —
   `defect_type`, `grounding` (exact | fuzzy | line), `found_by`, `verifier_note`, `resolved_by`; у `SourceLocation` —

@@ -318,3 +318,45 @@ def test_foreign_script_leaks_are_removed_from_model_text(sample_path):
 
     report = run_pipeline(parse_document(sample_path), scripted(verdict=leaky))
     assert "矛盾" not in report.conclusion.rationale
+
+
+def test_interactive_answers_like_bbc_ask(sample_path, monkeypatch, capsys):
+    """CLI --ask: вопросы в консоли, ответ номером варианта учитывается в этом же прогоне."""
+    seen = {}
+
+    def resolver(system, user):
+        seen["user"] = user
+        return {"resolutions": []}
+
+    replies = iter(["1", "q"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(replies))
+    report = run_pipeline(parse_document(sample_path), scripted(resolver=resolver), interactive=True)
+    q1 = report.questions[0]
+    assert q1.answer == q1.options[0]
+    assert f"Ответ автора: {q1.options[0]}" in seen["user"]
+    assert "Агент задаёт уточняющие вопросы" in capsys.readouterr().out
+
+
+def test_web_ask_author_pauses_on_questions_and_uses_answers(sample_path):
+    """Веб-аналог --ask: при options.ask_author ядро отдаёт вопросы обработчику и учитывает ответы в этом же прогоне."""
+    asked: list = []
+
+    def ask(questions):
+        asked.append(questions)
+        q = questions[0]
+        return {q.id: q.options[0], "Q-99": "лишний ответ на несуществующий вопрос"}
+
+    def resolver(system, user):
+        return {"resolutions": []}
+
+    events = []
+    report = run_pipeline(parse_document(sample_path), scripted(resolver=resolver), on_progress=events.append,
+                          options=ValidationOptions(ask_author=True), ask_author=ask)
+    assert len(asked) == 1 and asked[0] and all(q.question for q in asked[0])
+    q1 = next(q for q in report.questions if q.id == asked[0][0].id)
+    assert q1.answer == asked[0][0].options[0]
+    assert any("Ждём ответов автора" in e.message for e in events)
+    # без флага обработчик не вызывается — прогон не ждёт
+    asked.clear()
+    run_pipeline(parse_document(sample_path), scripted(resolver=resolver), ask_author=ask)
+    assert asked == []

@@ -1,13 +1,15 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
-import { db, sampleReport } from '@/mocks/data'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { db, sampleReport, withAnswers } from '@/mocks/data'
 import { RunPage } from '@/features/runs/RunPage'
 import { renderWithProviders } from '@/test/render'
 
 const renderReport = (query = '') => renderWithProviders(<RunPage />, { route: `/runs/run-sample${query}`, path: '/runs/:id' })
 
 describe('Report screen', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
   it('shows the document with highlighted quotes and the findings list', async () => {
     const { container } = renderReport()
     const list = await screen.findByTestId('findings-list')
@@ -113,6 +115,47 @@ describe('Report screen', () => {
     expect(JSON.parse(localStorage.getItem('reqcheck.answers.run-sample') ?? '{}')[qs[0].id]).toEqual({ choice: 0 })
     await user.click(screen.getAllByRole('button', { name: qs[0].finding_ids![0] })[0])
     expect(screen.getByRole('tab', { name: /Дефекты/ })).toHaveAttribute('data-state', 'active')
+  })
+
+  it('re-checks the document with the author answers as a new run', async () => {
+    // после запуска открывается экран нового прогона с потоком событий — в jsdom EventSource нет
+    vi.stubGlobal('EventSource', class { readyState = 0; onmessage = null; onerror = null; addEventListener() {} close() {} })
+    const user = userEvent.setup()
+    renderReport()
+    await screen.findByTestId('findings-list')
+    await user.click(screen.getByRole('tab', { name: /Вопросы/ }))
+    const rerun = screen.getByRole('button', { name: 'Перепроверить с ответами' })
+    expect(rerun).toBeDisabled()
+    const qs = sampleReport.questions!
+    await user.click(within(screen.getAllByRole('radiogroup', { name: 'Варианты ответа' })[0]).getAllByRole('radio')[1])
+    await user.type(screen.getAllByPlaceholderText('Свой вариант ответа')[1], 'Только по рабочим дням')
+    await user.click(rerun)
+    // новый прогон того же документа той же моделью, с ответами {Q-…: текст}
+    await waitFor(() => expect(db.runs[0].id).not.toBe('run-sample'))
+    const sample = db.runs.find((r) => r.id === 'run-sample')!
+    expect(db.runs[0]).toMatchObject({ document_id: sample.document_id, provider: sample.provider, model: sample.model })
+    expect(db.runs[0].options.answers).toEqual({ [qs[0].id]: qs[0].options![1], [qs[1].id]: 'Только по рабочим дням' })
+    // пакет и параллельность — из текущих настроек, а не из старого прогона
+    expect(db.runs[0].options).not.toHaveProperty('concurrency')
+    expect(db.runs[0].options).not.toHaveProperty('batch_size')
+  })
+
+  it('shows the author answer, new wording and closed findings of a report built with answers', async () => {
+    const user = userEvent.setup()
+    const q = sampleReport.questions![0]
+    db.reports['run-sample'] = withAnswers(sampleReport, { [q.id]: q.options![0] })
+    renderReport()
+    const list = await screen.findByTestId('findings-list')
+    const closed = q.finding_ids![0]
+    expect(within(list.querySelector(`[data-finding="${closed}"]`) as HTMLElement).getByText(`Снят ответом на ${q.id}`)).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: /Вопросы/ }))
+    expect(screen.getByRole('status')).toHaveTextContent(`учтено 1 из ${sampleReport.questions!.length}`)
+    const res = screen.getByRole('region', { name: 'Что изменил ответ' })
+    expect(within(res).getByText(q.options![0])).toBeInTheDocument()
+    expect(within(res).getByText('Новые формулировки')).toBeInTheDocument()
+    expect(within(res).getByRole('button', { name: closed })).toBeInTheDocument()
+    // ответ из отчёта — начальное значение черновика: его вариант уже выбран
+    expect(within(screen.getAllByRole('radiogroup', { name: 'Варианты ответа' })[0]).getAllByRole('radio')[0]).toBeChecked()
   })
 
   it('groups findings by severity or document order and steps through them with ↑↓', async () => {

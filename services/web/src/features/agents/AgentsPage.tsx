@@ -1,6 +1,6 @@
 // Страница «Агенты»: архитектура проверки — какие агенты есть, что делает каждый, что получает и кому передаёт,
 // кто отвечает за какие критерии и как дефект проходит путь от находки до отчёта.
-import { ArrowDown, BookOpen, Bot, Code2, Database, Layers, MousePointerClick } from 'lucide-react'
+import { ArrowDown, BookOpen, Bot, Code2, Database, Gauge, Layers, MousePointerClick } from 'lucide-react'
 import { Fragment, useRef, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router'
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/misc'
 import { REQUIREMENT_CRITERIA, SET_CRITERIA } from '@/shared/criteria'
 import { cn } from '@/shared/utils'
-import { AGENTS, byId, FINDER_IDS, FLOW, inputsOf, LANES, outputsOf, PRINCIPLES, type AgentDef, type AgentKind } from './model'
+import { AGENTS, byId, FINDER_IDS, FLOW, inputsOf, LANES, outputsOf, PRINCIPLES, SPEED, type AgentDef, type AgentKind } from './model'
 
 const KIND_COLOR: Record<AgentKind, string> = {
   llm: 'var(--accent-2)',
@@ -163,6 +163,24 @@ export function AgentsPage() {
               <span className="font-mono text-[0.6875rem] text-muted-foreground">{String(i + 1).padStart(2, '0')}</span>
               <span className="font-medium">{t(`agentsPage.principles.${p}.title`)}</span>
               <span className="text-sm text-muted-foreground">{t(`agentsPage.principles.${p}.text`)}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section aria-labelledby="agents-speed" className="flex flex-col gap-4">
+        <div>
+          <h2 id="agents-speed" className="text-lg font-medium tracking-tight">
+            {t('agentsPage.speedTitle')}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t('agentsPage.speedHint')}</p>
+        </div>
+        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {SPEED.map((s) => (
+            <li key={s} className="flex flex-col gap-2 rounded-2xl bg-card p-4 shadow-card">
+              <Gauge className="size-4 text-accent-2" aria-hidden />
+              <span className="font-medium">{t(`agentsPage.speed.${s}.title`)}</span>
+              <span className="text-sm text-muted-foreground">{t(`agentsPage.speed.${s}.text`)}</span>
             </li>
           ))}
         </ul>

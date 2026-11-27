@@ -95,7 +95,7 @@ class ProviderUpdate(BaseModel):
         default=None, description="extra_body для проверки набора требований (None — как extra_body)")
     max_output_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
     timeout_s: int | None = Field(default=None, ge=10, le=3600,
-                                  description="Таймаут одного запроса к модели, с (null — 180 с по умолчанию ядра)")
+                                  description="Таймаут одного запроса к модели, с (null — 600 с по умолчанию ядра, как в bbc-agent)")
 
 
 class ProviderTestIn(BaseModel):
