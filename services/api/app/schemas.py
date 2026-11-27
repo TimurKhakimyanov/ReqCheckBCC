@@ -111,11 +111,18 @@ class ProviderTestOut(BaseModel):
     latency_ms: int
     error: str | None = None
     models: list[str] = Field(default_factory=list, description="Модели, доступные с этими ключом и адресом")
+    model: str | None = Field(default=None, description="Модель, на которой выполнена проверка")
+    default_model_valid: bool | None = Field(
+        default=None, description="Есть ли модель по умолчанию в списке провайдера (null — не задана или список не получен)")
+    warning: str | None = None
 
 
 class ModelsOut(BaseModel):
     models: list[str]
     error: str | None = None
+    default_model: str | None = None
+    default_model_valid: bool | None = None
+    warning: str | None = None
 
 
 # --- documents & runs ---

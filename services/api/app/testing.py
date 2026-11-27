@@ -118,13 +118,18 @@ def fake_render_report(report, fmt) -> bytes:
 
 # Последние конфиги, с которыми API звал ядро (проверка, что ключи/адреса/параметры берутся из БД)
 CORE_CALLS: dict[str, object] = {}
+# Живые списки моделей фейкового провайдера (у anthropic нет устаревшей claude-opus-4-1)
+LIVE_MODELS = {
+    "gemini": ["gemini-2.5-pro", "gemini-2.5-flash"],
+    "anthropic": ["claude-haiku-4-5", "claude-opus-4-5", "claude-sonnet-4", "claude-sonnet-4-5"],
+}
 
 
 def fake_list_models(cfg) -> list[str]:
     CORE_CALLS["list_models"] = cfg
     if cfg.api_key is not None and cfg.api_key.get_secret_value() == "bad-key":
         raise PermissionError("401 invalid api key")
-    return ["model-b", "model-a"]
+    return LIVE_MODELS.get(cfg.provider.value, ["model-b", "model-a"])
 
 
 class _FakeLLM:

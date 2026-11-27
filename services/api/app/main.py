@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 
+import req_core
 from fastapi import FastAPI, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import select
@@ -18,7 +20,7 @@ from .knowledge import start_builtin_indexer
 from .logging_setup import setup_logging
 from .metrics import MetricsMiddleware
 from .models import User
-from .providers import seed_providers
+from .providers import reset_stale_default_models, seed_providers
 from .routers import auth, chat, documents, knowledge, providers, runs, settings, system
 from .security import hash_password
 from .services import get_services
@@ -44,6 +46,14 @@ def bootstrap() -> None:
         db.commit()
 
 
+def _check_default_models() -> None:
+    """Обнулить сохранённые модели по умолчанию, которых больше нет у провайдера (если список получен)."""
+    try:
+        reset_stale_default_models(req_core.list_models)
+    except Exception:  # noqa: BLE001 — проверка при старте не должна мешать работе api
+        log.warning("default model check failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     s = get_settings()
@@ -62,6 +72,7 @@ async def lifespan(app: FastAPI):
         log.warning("s3 bucket check failed at startup", exc_info=True)
     if not s.is_test:
         start_builtin_indexer(svc)
+        threading.Thread(target=_check_default_models, name="default-models", daemon=True).start()
     log.info("api started", extra={"version": s.agent_version})
     yield
 

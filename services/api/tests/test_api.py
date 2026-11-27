@@ -71,7 +71,7 @@ async def test_providers(client):
     assert p["has_key"] and p["key_hint"] == "…7890" and p["default_model"] == "gemini-2.5-flash"
     assert secret not in (await client.get("/api/providers")).text
     r = await client.get("/api/providers/gemini/models")
-    assert r.json()["models"] == ["model-a", "model-b"]
+    assert r.json()["models"] == ["gemini-2.5-flash", "gemini-2.5-pro"] and r.json()["default_model_valid"] is True
     r = await client.put("/api/providers/nope", json={})
     assert r.status_code == 422
 
@@ -156,7 +156,7 @@ async def test_openai_compatible_without_key(client):
     await client.post("/api/providers/openai_compatible/test", json={"extra_body": None})
     assert testing.CORE_CALLS["complete"].extra_body is None  # несохранённое значение из формы
     r = await client.get("/api/providers/openai_compatible/models")
-    assert r.json() == {"models": ["model-a", "model-b"], "error": None}
+    assert r.json()["models"] == ["model-a", "model-b"] and r.json()["error"] is None
     assert testing.CORE_CALLS["list_models"].base_url == url
     doc = (await client.post("/api/documents", files={"file": ("tmp.md", b"# x", "text/markdown")})).json()
     r = await client.post("/api/runs", json={"document_id": doc["id"], "provider": "openai_compatible",
@@ -164,6 +164,33 @@ async def test_openai_compatible_without_key(client):
     assert r.status_code == 202, r.text
     assert r.json()["options"]["batch_size"] == 10 and r.json()["options"]["concurrency"] == 2
     assert (await client.delete(f"/api/documents/{doc['id']}")).status_code == 204
+
+
+async def test_stale_default_model(client):
+    """Устаревшая модель по умолчанию: проверка идёт на живой модели, а админке приходит предупреждение."""
+    from app.providers import reset_stale_default_models
+
+    await client.put("/api/providers/anthropic", json={"api_key": "sk-ant-test-123456", "default_model": "claude-opus-4-1"})
+    r = (await client.post("/api/providers/anthropic/test")).json()
+    assert r["ok"] is True and r["model"] == "claude-sonnet-4-5", r
+    assert r["default_model_valid"] is False and "claude-opus-4-1" in r["warning"]
+    assert testing.CORE_CALLS["complete"].model == "claude-sonnet-4-5"
+    m = (await client.get("/api/providers/anthropic/models")).json()
+    assert m["default_model"] == "claude-opus-4-1" and m["default_model_valid"] is False and m["warning"]
+
+    # список не получен (неверный ключ) — модель по умолчанию не трогаем
+    await client.put("/api/providers/openai", json={"api_key": "bad-key", "default_model": "gpt-x"})
+    reset = await asyncio.to_thread(reset_stale_default_models, testing.fake_list_models)
+    assert reset == [("anthropic", "claude-opus-4-1")]
+    providers = {p["provider"]: p for p in (await client.get("/api/providers")).json()}
+    assert providers["anthropic"]["default_model"] is None and providers["openai"]["default_model"] == "gpt-x"
+    assert providers["gemini"]["default_model"] == "gemini-2.5-flash"  # есть в списке — осталась
+    m = (await client.get("/api/providers/anthropic/models")).json()
+    assert m["default_model_valid"] is None and m["warning"] is None
+    r = (await client.post("/api/providers/anthropic/test")).json()
+    assert r["ok"] and r["model"] == "claude-sonnet-4-5" and r["default_model_valid"] is None
+    await client.put("/api/providers/openai", json={"api_key": "", "default_model": ""})
+    await client.put("/api/providers/anthropic", json={"api_key": ""})
 
 
 async def test_upload_document(client):

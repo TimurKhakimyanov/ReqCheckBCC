@@ -17,8 +17,12 @@ from ..providers import (
     Overrides,
     ProviderNotConfigured,
     build_provider_config,
+    configured_default_model,
+    default_model_valid,
     get_or_create,
+    preferred_model,
     set_api_key,
+    unavailable_warning,
 )
 from ..schemas import ModelsOut, ProviderOut, ProviderTestIn, ProviderTestOut, ProviderUpdate
 
@@ -90,7 +94,11 @@ async def _live_models(cfg: ProviderConfig) -> tuple[list[str], str | None]:
 @router.post("/{provider}/test", response_model=ProviderTestOut)
 async def test_provider(provider: ProviderName, _: CurrentUser, db: DB,
                         body: ProviderTestIn | None = None) -> ProviderTestOut:
-    """Проверка ключа/адреса: список моделей и короткий запрос к модели. Значения из тела не сохраняются."""
+    """Проверка ключа/адреса: живой список моделей и короткий запрос к модели. Значения из тела не сохраняются.
+
+    Запрос идёт к модели по умолчанию, если она есть в списке провайдера; иначе — к подходящей модели из списка,
+    а устаревшая модель по умолчанию отмечается `default_model_valid: false` и предупреждением.
+    """
     overrides = Overrides(api_key=body.api_key, base_url=body.base_url, extra_body=body.extra_body,
                           extra_body_set=body is not None and "extra_body" in body.model_fields_set) if body else None
     try:
@@ -102,30 +110,41 @@ async def test_provider(provider: ProviderName, _: CurrentUser, db: DB,
     cfg = cfg.model_copy(update={"max_attempts": 1, "min_interval_s": 0.0})
     start = time.perf_counter()
     models, list_error = await _live_models(cfg)
-    model = cfg.model or (models[0] if models else "")
+    default = await run_in_threadpool(configured_default_model, db, provider.value)
+    valid = default_model_valid(default, models)
+    if models and cfg.model not in models:
+        model = preferred_model(provider.value, models)  # модель по умолчанию не задана или устарела
+    else:
+        model = cfg.model or preferred_model(provider.value, models)
+    warning = unavailable_warning(default) if valid is False else None
+    result = {"models": models, "model": model, "default_model_valid": valid, "warning": warning}
     if not model:
-        return ProviderTestOut(ok=False, latency_ms=_ms(start), models=models,
-                               error=list_error or "Не выбрана модель для проверки")
+        return ProviderTestOut(ok=False, latency_ms=_ms(start), error=list_error or "Не выбрана модель для проверки",
+                               **result)
     try:
         client = req_core.get_llm(cfg.model_copy(update={"model": model}))
         await asyncio.wait_for(run_in_threadpool(client.complete, "Answer with one word.", "ping"),
                                timeout=cfg.timeout_s + 15)
     except Exception as e:  # noqa: BLE001
-        return ProviderTestOut(ok=False, latency_ms=_ms(start), models=models, error=_error_text(e))
-    return ProviderTestOut(ok=True, latency_ms=_ms(start), models=models)
+        return ProviderTestOut(ok=False, latency_ms=_ms(start), error=_error_text(e), **result)
+    return ProviderTestOut(ok=True, latency_ms=_ms(start), **result)
 
 
 @router.get("/{provider}/models", response_model=ModelsOut)
 async def provider_models(provider: ProviderName, _: CurrentUser, db: DB) -> ModelsOut:
     """Живой список моделей с сохранёнными ключом и адресом; при ошибке — подсказки и текст ошибки."""
+    default = configured_default_model(db, provider.value)
     fallback = list(FALLBACK_MODELS.get(provider.value, []))
-    row = db.get(ProviderSetting, provider.value)
-    if row is not None and row.default_model and row.default_model not in fallback:
-        fallback.insert(0, row.default_model)
+    if default and default not in fallback:
+        fallback.insert(0, default)
     try:
         cfg = await run_in_threadpool(lambda: build_provider_config(
             db, provider.value, None, require_enabled=False, require_model=False))
     except ProviderNotConfigured as e:
-        return ModelsOut(models=fallback, error=str(e))
+        return ModelsOut(models=fallback, error=str(e), default_model=default)
     models, error = await _live_models(cfg.model_copy(update={"timeout_s": 20.0, "max_attempts": 1}))
-    return ModelsOut(models=models, error=None) if models else ModelsOut(models=fallback, error=error)
+    if not models:
+        return ModelsOut(models=fallback, error=error, default_model=default)
+    valid = default_model_valid(default, models)
+    return ModelsOut(models=models, default_model=default, default_model_valid=valid,
+                     warning=unavailable_warning(default) if valid is False else None)

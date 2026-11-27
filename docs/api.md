@@ -22,10 +22,12 @@ FastAPI публикует полный OpenAPI на `/api/openapi.json` — о�
 | :--- | :--- | :--- |
 | GET | `/providers` | → `[{provider, enabled, has_key, key_hint: "…a1b2", base_url, default_model, extra_body, extra_body_set_review, max_output_tokens, timeout_s, updated_at}]` для `gemini, openai, anthropic, openai_compatible` |
 | PUT | `/providers/{provider}` | `{api_key?, base_url?, enabled?, default_model?, extra_body?, extra_body_set_review?, max_output_tokens?, timeout_s?}` → объект провайдера. `api_key: ""` — удалить ключ; `null` в `extra_body*`/`max_output_tokens`/`timeout_s` — сбросить |
-| POST | `/providers/{provider}/test` | необязательное тело `{api_key?, base_url?, extra_body?}` — несохранённые значения из формы поверх сохранённых (не записываются) → `{ok, latency_ms, error?, models: [string]}`: живой список моделей и короткий запрос к модели (по умолчанию — `default_model`, иначе первая из списка) |
-| GET | `/providers/{provider}/models` | → `{models: [string], error?}` — живой список через ядро с сохранёнными ключом и адресом; при ошибке — подсказки и текст `error` |
+| POST | `/providers/{provider}/test` | необязательное тело `{api_key?, base_url?, extra_body?}` — несохранённые значения из формы поверх сохранённых (не записываются) → `{ok, latency_ms, error?, models: [string], model, default_model_valid, warning?}`: живой список моделей и короткий запрос к модели — к модели по умолчанию, если она есть в списке, иначе к подходящей из списка (`model` — на какой проверено). `default_model_valid: false` и `warning` — модель по умолчанию устарела у провайдера (ключ при этом рабочий, `ok: true`); `null` — модель не задана или список не получен |
+| GET | `/providers/{provider}/models` | → `{models: [string], error?, default_model, default_model_valid, warning?}` — живой список через ядро с сохранёнными ключом и адресом; при ошибке — подсказки и текст `error` (`default_model_valid: null`) |
 
-Ключ никогда не возвращается целиком. `openai_compatible` (vLLM, Ollama, LM Studio) считается настроенным, если задан
+Ключ никогда не возвращается целиком. При старте api проверяет сохранённые модели по умолчанию (в карточке провайдера и в `/settings`)
+и обнуляет те, которых нет в живом списке провайдера; если список получить не удалось, ничего не меняется (в аудите —
+`default_model_reset`). `openai_compatible` (vLLM, Ollama, LM Studio) считается настроенным, если задан
 `base_url` (например `http://vllm.example.local:8000/v1`); ключ необязателен. Адреса по умолчанию нет.
 
 Доп. параметры запроса к модели (передаются ядру в `ProviderConfig`, в том числе в `test`):

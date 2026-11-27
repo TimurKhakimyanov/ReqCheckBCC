@@ -6,14 +6,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from pydantic import SecretStr
 from req_contracts import ProviderConfig, ProviderName
 from sqlalchemy.orm import Session
 
-from .app_settings import AppSettings, get_app_settings
+from .app_settings import AppSettings, get_app_settings, load_row
+from .audit import audit
 from .config import PROVIDERS
+from .db import SessionLocal
 from .models import ProviderSetting
 from .security import decrypt_secret, encrypt_secret, key_hint
 
@@ -148,3 +151,82 @@ def build_provider_config(db: Session, provider: str, model: str | None = None, 
         extra_body=overrides.extra_body if overrides and overrides.extra_body_set else row.extra_body,
         extra_body_set_review=row.extra_body_set_review,
     )
+
+
+# Предпочтения при выборе модели для проверки ключа, если модель по умолчанию не задана или недоступна:
+# недорогая актуальная модель семейства (подстроки по порядку), иначе первая из списка.
+PREFERRED_MODEL_HINTS: dict[str, tuple[str, ...]] = {
+    "anthropic": ("sonnet", "haiku"),
+    "gemini": ("flash", "pro"),
+    "openai": ("mini", "gpt-4"),
+}
+
+
+def configured_default_model(db: Session, provider: str) -> str | None:
+    """Модель по умолчанию, заданная админом: в карточке провайдера или в /settings для провайдера по умолчанию."""
+    row = db.get(ProviderSetting, provider)
+    if row is not None and row.default_model:
+        return row.default_model
+    settings = get_app_settings(db)
+    if settings.default_provider.value == provider and settings.default_model:
+        return settings.default_model
+    return None
+
+
+def preferred_model(provider: str, models: list[str]) -> str | None:
+    if not models:
+        return None
+    for hint in PREFERRED_MODEL_HINTS.get(provider, ()):
+        # самые новые версии обычно идут позже по алфавиту (claude-sonnet-4-5 > claude-sonnet-4)
+        matches = sorted((m for m in models if hint in m.lower()), reverse=True)
+        if matches:
+            return matches[0]
+    return models[0]
+
+
+def default_model_valid(default: str | None, models: list[str]) -> bool | None:
+    """None — проверить нельзя (модель не задана или список моделей не получен)."""
+    if not default or not models:
+        return None
+    return default in models
+
+
+def unavailable_warning(default: str) -> str:
+    return f"Модель по умолчанию {default} недоступна у провайдера — выберите другую"
+
+
+def reset_stale_default_models(list_models: Callable[[ProviderConfig], list[str]]) -> list[tuple[str, str]]:
+    """Старт api: обнулить сохранённые модели по умолчанию, которых нет у провайдера.
+
+    Трогает провайдера, только если его список моделей удалось получить и он не пуст. Возвращает (провайдер, модель).
+    """
+    reset: list[tuple[str, str]] = []
+    with SessionLocal() as db:
+        settings_row = load_row(db)
+        settings = AppSettings.model_validate(settings_row.data)
+        for provider in PROVIDERS:
+            row = db.get(ProviderSetting, provider)
+            defaults = {d for d in (row.default_model if row else None,
+                                    settings.default_model if settings.default_provider.value == provider else None) if d}
+            if not defaults or not is_configured(row):
+                continue
+            try:
+                cfg = build_provider_config(db, provider, None, require_enabled=False, require_model=False)
+                models = set(list_models(cfg.model_copy(update={"timeout_s": 20.0, "max_attempts": 1})) or [])
+            except Exception as e:  # noqa: BLE001 — провайдер недоступен: ничего не трогаем
+                log.info("default model check skipped", extra={"provider": provider, "error": str(e)[:200]})
+                continue
+            if not models:
+                continue
+            if row.default_model and row.default_model not in models:
+                reset.append((provider, row.default_model))
+                row.default_model = None
+            if settings.default_provider.value == provider and settings.default_model \
+                    and settings.default_model not in models:
+                reset.append((provider, settings.default_model))
+                settings_row.data = {**settings_row.data, "default_model": None}
+        for provider, model in reset:
+            log.warning("stale default model reset", extra={"provider": provider, "model": model})
+            audit(db, "system", "default_model_reset", provider, {"model": model}, commit=False)
+        db.commit()
+    return reset
