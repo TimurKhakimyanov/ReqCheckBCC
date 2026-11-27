@@ -50,7 +50,7 @@ function ProviderCard({ p }: { p: ProviderSettings }) {
   }
 
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle>{t(`provider.${p.provider}`)}</CardTitle>
@@ -108,7 +108,7 @@ function ProviderCard({ p }: { p: ProviderSettings }) {
             <span className="text-xs text-muted-foreground">
               {p.updated_at ? t('settings.updated', { date: formatDate(p.updated_at) }) : ''}
             </span>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               {p.has_key && (
                 <Button type="button" variant="ghost" size="sm" onClick={() => window.confirm(t('settings.confirmRemoveKey')) && save.mutate({ api_key: '' })}>
                   {t('settings.removeKey')}
