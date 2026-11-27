@@ -199,7 +199,7 @@ def test_long_model_title_is_split_without_losing_text():
     long = ("«Проведённые покупки» — неопределённый статус: не сказано, что считать проведённой покупкой "
             "(авторизованная, поставленная в оборот, со статусом posted), поэтому тестировщик не знает, что проверять.")
     title, expl = split_title(long, "Короткое пояснение.")
-    assert len(title) <= TITLE_LIMIT and title.startswith("«Проведённые покупки»")
+    assert title == "«Проведённые покупки» — неопределённый статус"
     assert long in expl and expl.endswith("Короткое пояснение.")
     assert split_title("Коротко", "Пояснение") == ("Коротко", "Пояснение")
     assert split_title("", "Только пояснение") == ("Только пояснение", "Только пояснение")
@@ -210,3 +210,11 @@ def test_checklist_prompt_sees_the_document(sample_path):
     run_pipeline(parse_document(sample_path), llm)
     call = next(c for c in llm.calls if c.get("schema") == "ChecklistResult")
     assert "<document>" in call["user"] and "Архитектура решения" in call["user"]
+
+
+def test_short_first_phrase_is_not_used_as_title():
+    from req_core.pipeline import TITLE_LIMIT, split_title
+
+    long = "«Переводы» — не определено, относятся ли к ним переводы между своими картами, пополнения и платежи по реквизитам"
+    title, _ = split_title(long, "")
+    assert title.startswith("«Переводы» — не определено") and len(title) <= TITLE_LIMIT
