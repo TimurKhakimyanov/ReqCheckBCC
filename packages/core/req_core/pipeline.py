@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -82,18 +83,34 @@ class Settings:
 
 
 class Progress:
+    """Обёртка над on_progress. Исключение из callback (отмена, таймаут воркера) НЕ глотается:
+    оно запоминается в `aborted` и прерывает конвейер, даже если возникло внутри LLM-вызова."""
+
     def __init__(self, cb: ProgressCallback | None):
         self.cb = cb
         self.last = 0.0
+        self.stage = RunStage.PARSING
+        self.aborted: BaseException | None = None
+        self._lock = threading.Lock()
 
     def __call__(self, stage: RunStage, progress: float, message: str = "", current: int | None = None,
                  total: int | None = None) -> None:
-        self.last = max(self.last, min(1.0, progress))
+        if self.aborted is not None:
+            raise self.aborted
+        with self._lock:
+            self.last = max(self.last, min(1.0, progress))
+            self.stage = stage
+            event = ProgressEvent(stage=stage, progress=self.last, message=message, current=current, total=total)
         if self.cb:
             try:
-                self.cb(ProgressEvent(stage=stage, progress=self.last, message=message, current=current, total=total))
-            except Exception:  # noqa: BLE001 — прогресс не должен ронять прогон
-                log.exception("on_progress упал")
+                self.cb(event)
+            except BaseException as e:
+                self.aborted = e
+                raise
+
+    def heartbeat(self, message: str) -> None:
+        """Событие без изменения стадии — во время ожидания лимитов провайдера (даёт сработать отмене)."""
+        self(self.stage, self.last, message)
 
 
 def _fatal(e: BaseException) -> bool:
@@ -118,6 +135,10 @@ class Pipeline:
         self.warnings: list[str] = []
         self.dropped_unverified = 0
         self.llm_ok = 0
+        try:  # клиент LLM сообщает о паузах перед повтором (429) — пробрасываем как heartbeat прогресса
+            client.on_wait = progress.heartbeat
+        except AttributeError:
+            pass
 
     # ------------------------------------------------------------ LLM-вызов с учётом ошибок
 
@@ -127,6 +148,8 @@ class Pipeline:
             self.llm_ok += 1
             return res
         except Exception as e:  # noqa: BLE001
+            if self.progress.aborted is not None:  # отмена/таймаут из on_progress — прерываем прогон
+                raise
             # первая же неудача на нарезке (сеть, квота) — дальше всё упадёт так же; ошибку схемы терпим
             if _fatal(e) or (self.llm_ok == 0 and what == "нарезка" and not isinstance(e, LLMError)):
                 raise
@@ -273,10 +296,18 @@ class Pipeline:
         doc = prompts.doc_block(self.text, self.s.context_chars)
         crit = prompts.requirement_criteria_block()
         done = 0
-        total = len(batches)
-        self.progress(RunStage.CHECKING_REQUIREMENTS, 0.3, "Проверка требований", 0, total)
+        total = len(drafts)  # прогресс — по требованиям (current/total), хотя бы одно событие на каждое
+
+        def report_batch(batch: list[ReqDraft]) -> None:
+            nonlocal done
+            for d in batch:
+                done += 1
+                self.progress(RunStage.CHECKING_REQUIREMENTS, 0.3 + 0.4 * done / total,
+                              f"Проверено требование {d.id}", done, total)
 
         def run(batch: list[ReqDraft]) -> RequirementBatchResult | None:
+            self.progress(RunStage.CHECKING_REQUIREMENTS, 0.3 + 0.4 * done / total,
+                          f"Проверка требований {batch[0].id}–{batch[-1].id}", done, total)
             bids = {d.id for d in batch} | {p.id for d in batch for p in d.parts}
             kn = [f for f in known if set(f.requirement_ids) & bids]
             user = prompts.REQ_TASK.format(
@@ -286,19 +317,18 @@ class Pipeline:
             return self.ask(user, RequirementBatchResult, "проверка требований " + ", ".join(d.id for d in batch))
 
         results: list[RequirementBatchResult | None] = []
-        if self.s.concurrency > 1 and total > 1:
-            with ThreadPoolExecutor(self.s.concurrency) as ex:
-                for res in ex.map(run, batches):
+        if self.s.concurrency > 1 and len(batches) > 1:
+            ex = ThreadPoolExecutor(self.s.concurrency)
+            try:
+                for b, res in zip(batches, ex.map(run, batches)):
                     results.append(res)
-                    done += 1
-                    self.progress(RunStage.CHECKING_REQUIREMENTS, 0.3 + 0.4 * done / total,
-                                  "Проверка требований", done, total)
+                    report_batch(b)
+            finally:  # при отмене не ждём оставшиеся пакеты
+                ex.shutdown(wait=self.progress.aborted is None, cancel_futures=True)
         else:
             for b in batches:
                 results.append(run(b))
-                done += 1
-                self.progress(RunStage.CHECKING_REQUIREMENTS, 0.3 + 0.4 * done / total,
-                              "Проверка требований", done, total)
+                report_batch(b)
         issues: list[FindingDraft] = []
         na: dict[str, set[Criterion]] = {}
         for res in results:

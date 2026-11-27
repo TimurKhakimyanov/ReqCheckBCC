@@ -163,6 +163,17 @@ class BaseLLM:
         self._last_call = 0.0
         self.min_interval = float(os.environ.get("LLM_MIN_INTERVAL_S", "0") or 0)
         self.sleep: Callable[[float], None] = time.sleep
+        # Вызывается перед каждым отрезком паузы (≤5 с) при повторе; исключение из него прерывает вызов.
+        self.on_wait: Callable[[str], None] | None = None
+
+    def _pause(self, seconds: float, reason: str) -> None:
+        left = seconds
+        while left > 0:
+            if self.on_wait:
+                self.on_wait(f"{reason}: повтор через {left:.0f} с")
+            step = min(5.0, left)
+            self.sleep(step)
+            left -= step
 
     # --- реализуют провайдеры
     def _call(self, system: str, messages: list[dict[str, str]], schema: tuple[str, dict] | None) -> str:
@@ -200,7 +211,8 @@ class BaseLLM:
                 wait = min(wait, 90.0) + random.uniform(0, 1.0)
                 log.warning("LLM %s: %s; повтор %d/%d через %.0f с", self.provider, type(e).__name__,
                             attempt, self.max_attempts, wait)
-                self.sleep(wait)
+                status = _status_of(e)
+                self._pause(wait, "Лимит запросов провайдера" if status == 429 else "Провайдер недоступен")
                 delay = min(delay * 2, 60.0)
         raise LLMError("unreachable")  # pragma: no cover
 
@@ -251,7 +263,7 @@ class BaseLLM:
             except Exception as e:  # noqa: BLE001
                 if started or attempt >= self.max_attempts or not is_retryable(e):
                     raise
-                self.sleep(min(retry_after_seconds(e) or 2.0 * attempt, 60.0))
+                self._pause(min(retry_after_seconds(e) or 2.0 * attempt, 60.0), "Повтор запроса")
 
     def list_models(self) -> list[str]:
         return []
@@ -330,6 +342,8 @@ class GeminiLLM(BaseLLM):
                 reason = str(resp.candidates[0].finish_reason)
             except Exception:  # noqa: BLE001
                 pass
+            if schema is None and "MAX_TOKENS" in reason:  # лимит съели «мысли» модели (проверка ключа)
+                return ""
             raise LLMError(f"Gemini вернул пустой ответ {reason}".strip())
         return text
 
@@ -375,7 +389,7 @@ class OpenAILLM(BaseLLM):
         if not key:
             if not self.compatible:
                 raise LLMConfigError("Не задан ключ OpenAI: OPENAI_API_KEY")
-            key = "not-needed"
+            key = "ollama"  # OpenAI SDK требует непустой ключ; Ollama/vLLM без авторизации его игнорируют
         self.client = OpenAI(api_key=key, base_url=base_url, timeout=cfg.timeout_s, max_retries=0)
         self._use_temperature = True
         self._schema_mode = "json_schema"  # → json_object → prompt
@@ -432,7 +446,10 @@ class OpenAILLM(BaseLLM):
         self.add_usage(getattr(u, "prompt_tokens", 0), getattr(u, "completion_tokens", 0))
         text = resp.choices[0].message.content if resp.choices else None
         if not text:
-            raise LLMError("OpenAI вернул пустой ответ")
+            finish = resp.choices[0].finish_reason if resp.choices else None
+            if schema is None and finish == "length":  # маленький лимит токенов (проверка ключа) — не ошибка
+                return ""
+            raise LLMError(f"{self.provider} вернул пустой ответ (finish_reason={finish})")
         return text
 
     def _stream(self, system, messages):

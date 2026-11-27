@@ -80,8 +80,9 @@ def test_complete_json_gives_up():
 def test_retry_on_429_and_5xx_with_backoff():
     llm = StubLLM([StatusError(429, "Please retry in 12.5s"), StatusError(503), '{"value": 1}'])
     assert llm.complete_json("s", "u", Out).value == 1
-    assert len(llm.sleeps) == 2
-    assert 12.5 <= llm.sleeps[0] <= 13.5
+    assert all(s <= 5.0 for s in llm.sleeps)  # пауза нарезана на отрезки (для отмены)
+    # 12.5 с по retry-after + 4 с экспоненциальной задержки (+ до 1 с джиттера на каждую)
+    assert 12.5 + 4.0 <= sum(llm.sleeps) <= 13.5 + 5.0
 
 
 def test_no_retry_on_400():
