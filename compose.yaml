@@ -44,30 +44,68 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      RUN_TIMEOUT_S: ${RUN_TIMEOUT_S:-1800}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # Начальные ключи провайдеров: записываются в кабинет при старте, если там ключа ещё нет.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_COMPATIBLE_API_KEY: ${OPENAI_COMPATIBLE_API_KEY:-}
+      OPENAI_COMPATIBLE_MODEL: ${OPENAI_COMPATIBLE_MODEL:-}
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-      qdrant: { condition: service_started }
-      seaweedfs: { condition: service_started }
+      # seaweedfs healthy только после создания бакета (entrypoint инфраструктуры)
+      qdrant: { condition: service_healthy }
+      seaweedfs: { condition: service_healthy }
+      embedder: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/livez', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      start_period: 20s
+      retries: 5
+    deploy: { resources: { limits: { cpus: "1.0", memory: 1g } } }
+    logging: &backend-logging { driver: json-file, options: { max-size: "10m", max-file: "5" } }
     networks: [frontend, backend]
 
   migrate:
     build: { <<: *python-build, dockerfile: services/api/Dockerfile, target: runtime }
     command: ["alembic", "upgrade", "head"]
+    restart: "no"
     environment: *app-env
     depends_on:
       postgres: { condition: service_healthy }
+    deploy: { resources: { limits: { cpus: "0.5", memory: 512m } } }
+    logging: *backend-logging
     networks: [backend]
 
   worker:
     build: { <<: *python-build, dockerfile: services/worker/Dockerfile, target: runtime }
     restart: unless-stopped
+    # Прогон отменяется через флаг; дать текущему шагу корректно завершиться
+    stop_grace_period: 30s
     environment:
       <<: *app-env
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      RUN_TIMEOUT_S: ${RUN_TIMEOUT_S:-1800}
+      WORKER_METRICS_PORT: "9101"  # Prometheus: worker:9101/metrics
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      seaweedfs: { condition: service_healthy }
+      embedder: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/metrics', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    deploy: { resources: { limits: { cpus: "2.0", memory: 2g } } }
+    logging: *backend-logging
     networks: [backend]
 
   embedder:
@@ -79,8 +117,21 @@ services:
         EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-intfloat/multilingual-e5-small}
     restart: unless-stopped
     environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-local}
       EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-intfloat/multilingual-e5-small}
+      EMBEDDINGS_API_KEY: ${EMBEDDINGS_API_KEY:-}
+      EMBEDDINGS_DIM: ${EMBEDDINGS_DIM:-768}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/info', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      start_period: 60s
+      retries: 10
+    deploy: { resources: { limits: { cpus: "2.0", memory: 2g } } }
+    logging: *backend-logging
     networks: [backend]
 
   # ===================== Ядро / CLI (сессия «Ядро») =====================

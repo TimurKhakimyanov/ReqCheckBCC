@@ -1,0 +1,23 @@
+[project]
+name = "reqcheck-worker"
+version = "0.1.0"
+description = "ReqCheck Celery worker: runs the agent core on uploaded documents"
+requires-python = ">=3.12"
+# Модели БД, хранилище, Qdrant и настройки — общие с сервисом api (пакет app).
+dependencies = ["reqcheck-api", "req-core", "req-contracts", "celery[redis]>=5.4", "prometheus-client>=0.20"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["worker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
