@@ -1,9 +1,29 @@
 import { toError } from '@/api/client'
 import i18n from '@/i18n'
 
-const locale = () => {
+/** Локаль Intl для текущего языка интерфейса. */
+export const locale = () => {
   const l = i18n.language || 'ru'
   return l === 'kk' ? 'kk-KZ' : l === 'ru' ? 'ru-RU' : 'en-GB'
+}
+
+/** Календарная дата YYYY-MM-DD (UTC) в формате Intl, без сдвига часового пояса. */
+export function formatDay(iso: string, opts: Intl.DateTimeFormatOptions) {
+  return new Intl.DateTimeFormat(locale(), { ...opts, timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`))
+}
+
+/** Диапазон дат: «14–27 нояб. 2026 г.», «28 окт. – 3 нояб. 2026 г.». */
+export function formatDayRange(from: string, to: string) {
+  const f = new Intl.DateTimeFormat(locale(), { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+  const a = new Date(`${from}T00:00:00Z`)
+  return from === to ? f.format(a) : f.formatRange(a, new Date(`${to}T00:00:00Z`))
+}
+
+/** Короткая запись больших чисел: 1,2 млн, 480 тыс. */
+export function formatCompact(n?: number | null) {
+  if (n === undefined || n === null) return '—'
+  if (Math.abs(n) < 10_000) return formatNumber(n)
+  return new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 }
 
 export function formatDate(iso?: string | null, opts: Intl.DateTimeFormatOptions = {}) {
