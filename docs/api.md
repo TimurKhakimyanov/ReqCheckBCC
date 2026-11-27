@@ -109,8 +109,13 @@ created_at, started_at?, finished_at?, error?, usage?: Usage, summary?: Summary}
 | GET | `/knowledge` | → `[KnowledgeItem]` (с `folder`, `updated_at`, `chars`) |
 | POST | `/knowledge` | multipart `file` (+ `folder`) или `{title, text, folder}` → `KnowledgeItem` (нарезка и индексация в фоне) |
 | GET | `/knowledge/{id}` | → `KnowledgeDetail`: `content`, `links` (`[[…]]` → `{title, id\|null}`), `backlinks`, `criteria` (коды упомянутых критериев) |
-| PATCH | `/knowledge/{id}` | `{title?, text?, folder?}` → `KnowledgeItem`; новый текст или название — переиндексация в фоне. Встроенное — только `folder`, иначе `409 builtin_protected` |
+| PATCH | `/knowledge/{id}` | `{title?, text?, folder?, update_links?}` → `KnowledgeItem`; новый текст или название — переиндексация в фоне. При смене названия ссылки `[[Старое]]` в других заметках переписываются на новое (`update_links: false` — не трогать). Встроенное — только `folder`, иначе `409 builtin_protected` |
 | GET | `/knowledge/graph` | → `{nodes: [{id, kind: note\|folder\|criterion, title, folder, source, size}], edges: [{source, target, kind: link\|criterion\|folder}]}` |
+| GET | `/knowledge/search?q=&limit=20` | → `[{id, title, folder, snippet, score}]`: полнотекстовый поиск по названию, папке и тексту (все слова запроса; совпадение в названии выше) |
+| GET | `/knowledge/folders` | → `[{path, notes, total, explicit}]`: все папки — созданные явно (в том числе пустые) и те, где лежат заметки |
+| POST | `/knowledge/folders` | `{path}` → `201 KnowledgeFolder`; `409 folder_exists`, `400 folder_required` |
+| PATCH | `/knowledge/folders` | `{path, new_path}` → `{path, moved}`: переименование или перенос вместе с вложенными папками и заметками; `400 folder_into_itself`, `404`, `409 folder_exists` |
+| DELETE | `/knowledge/folders?path=` | → `{path, moved}`: папка удаляется, заметки и вложенные папки переезжают в родительскую (`path` — куда) |
 | DELETE | `/knowledge/{id}` | → `204` |
 
 База знаний — вики: папка — путь через «/» («Банк/Шаблоны», пусто — корень); ссылки между заметками — `[[Название]]`,

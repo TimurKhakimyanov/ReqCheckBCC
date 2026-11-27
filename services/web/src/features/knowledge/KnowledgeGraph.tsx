@@ -25,27 +25,58 @@ const nextFrame = (cb: () => void): number =>
   typeof requestAnimationFrame === 'function' ? requestAnimationFrame(cb) : (setTimeout(cb, 16) as unknown as number)
 const cancelFrame = (id: number) => (typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame(id) : clearTimeout(id))
 
+/** Окрестность узла: он сам и всё, что связано с ним не дальше depth шагов по ссылкам и упоминаниям критериев
+ * (папки в окрестность не входят — иначе вся папка «прилипает» к странице). */
+export function neighborhood(graph: KnowledgeGraph, id: string, depth = 1): KnowledgeGraph {
+  const keep = new Set([id])
+  let frontier = [id]
+  for (let d = 0; d < depth; d++) {
+    const next: string[] = []
+    graph.edges.forEach((e) => {
+      if (e.kind === 'folder') return
+      for (const [a, b] of [[e.source, e.target], [e.target, e.source]])
+        if (frontier.includes(a) && !keep.has(b)) {
+          keep.add(b)
+          next.push(b)
+        }
+    })
+    frontier = next
+  }
+  return { nodes: graph.nodes.filter((n) => keep.has(n.id)), edges: graph.edges.filter((e) => keep.has(e.source) && keep.has(e.target)) }
+}
+
 const W = 1000
 const H = 700
 const REST: Record<string, number> = { folder: 90, link: 150, criterion: 180 }
 
 export function KnowledgeGraphView({
-  graph,
+  graph: full,
   selected,
   onOpen,
+  onFolder,
   colorOf,
+  compact = false,
 }: {
   graph: KnowledgeGraph
   selected: string | null
   onOpen: (id: string) => void
+  onFolder?: (folder: string) => void
   colorOf: (folder: string) => string
+  /** Маленький граф в боковой панели: без панели настроек и легенды */
+  compact?: boolean
 }) {
   const { t } = useTranslation()
-  const [showFolders, setShowFolders] = useState(true)
+  const [showFolders, setShowFolders] = useState(!compact)
   const [showCriteria, setShowCriteria] = useState(true)
+  const [local, setLocal] = useState(false)
   const [hover, setHover] = useState<string | null>(null)
   const [view, setView] = useState({ x: 0, y: 0, k: 1 })
   const [, setTick] = useState(0)
+  // в маленькой панели узлы крупнее (см. z ниже) — им нужно больше места
+  const repulse = compact ? 16000 : 4200
+  const spread = compact ? 1.8 : 1
+  const hasSelected = !!selected && full.nodes.some((n) => n.id === selected)
+  const graph = useMemo(() => (local && hasSelected ? neighborhood(full, selected!, 2) : full), [full, local, hasSelected, selected])
 
   const nodes = useMemo(
     () => graph.nodes.filter((n) => (n.kind !== 'folder' || showFolders) && (n.kind !== 'criterion' || showCriteria)),
@@ -85,7 +116,7 @@ export function KnowledgeGraphView({
             dy = Math.random() - 0.5
             d2 = 1
           }
-          const f = (4200 * alpha) / d2
+          const f = (repulse * alpha) / d2
           const d = Math.sqrt(d2)
           pa.vx += (dx / d) * f
           pa.vy += (dy / d) * f
@@ -100,7 +131,7 @@ export function KnowledgeGraphView({
         const dx = tt.x - s.x
         const dy = tt.y - s.y
         const d = Math.max(1, Math.hypot(dx, dy))
-        const f = ((d - REST[e.kind]) / d) * 0.04 * alpha
+        const f = ((d - REST[e.kind] * spread) / d) * 0.04 * alpha
         s.vx += dx * f
         s.vy += dy * f
         tt.vx -= dx * f
@@ -125,7 +156,7 @@ export function KnowledgeGraphView({
     }
     raf = nextFrame(step)
     return () => cancelFrame(raf)
-  }, [nodes, edges])
+  }, [nodes, edges, repulse, spread])
 
   // соседи для подсветки
   const focus = hover ?? selected
@@ -193,6 +224,7 @@ export function KnowledgeGraphView({
     const d = drag.current
     drag.current = null
     if (d && !d.moved && n?.kind === 'note') onOpen(n.id)
+    if (d && !d.moved && n?.kind === 'folder') onFolder?.(n.folder)
   }
   const onWheel = (e: WheelEvent) => {
     const r = svg.current!.getBoundingClientRect()
@@ -202,12 +234,14 @@ export function KnowledgeGraphView({
     setView((v) => ({ k, x: cx - ((cx - v.x) * k) / v.k, y: cy - ((cy - v.y) * k) / v.k }))
   }
 
+  const z = compact ? 2.2 : 1 // в маленькой панели узлы и подписи крупнее
   const tops = [...new Set(graph.nodes.filter((n) => n.kind === 'note').map((n) => topFolder(n.folder)))].sort()
   const labelAll = nodes.length <= 40
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
+    <div className={cn('flex min-h-0 flex-col', compact ? 'h-56 border bg-card' : 'h-full')}>
+      {!compact && (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2.5">
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={showFolders} onChange={(e) => setShowFolders(e.target.checked)} className="accent-[var(--primary)]" />
           {t('wiki.graphFolders')}
@@ -216,18 +250,25 @@ export function KnowledgeGraphView({
           <input type="checkbox" checked={showCriteria} onChange={(e) => setShowCriteria(e.target.checked)} className="accent-[var(--primary)]" />
           {t('wiki.graphCriteria')}
         </label>
+        {hasSelected && (
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={local} onChange={(e) => setLocal(e.target.checked)} className="accent-[var(--primary)]" />
+            {t('wiki.graphLocal')}
+          </label>
+        )}
         <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setView({ x: 0, y: 0, k: 1 })}>
           <Maximize2 />
           {t('wiki.graphReset')}
         </Button>
       </div>
-      <div className="relative min-h-[420px] flex-1 overflow-hidden bg-[radial-gradient(var(--dot)_1px,transparent_1.2px)] [background-size:16px_16px]">
+      )}
+      <div className={cn('relative flex-1 overflow-hidden bg-[radial-gradient(var(--dot)_1px,transparent_1.2px)] [background-size:16px_16px]', !compact && 'min-h-[420px]')}>
         <svg
           ref={svg}
           viewBox={`0 0 ${W} ${H}`}
           className="absolute inset-0 size-full touch-none select-none"
           role="img"
-          aria-label={t('wiki.graphAria', { notes: graph.nodes.filter((n) => n.kind === 'note').length, links: graph.edges.filter((e) => e.kind === 'link').length })}
+          aria-label={t(compact ? 'wiki.localGraphAria' : 'wiki.graphAria', { notes: graph.nodes.filter((n) => n.kind === 'note').length, links: graph.edges.filter((e) => e.kind === 'link').length })}
           onPointerDown={(e) => onDown(e, null)}
           onPointerMove={onMove}
           onPointerUp={() => onUp()}
@@ -263,13 +304,13 @@ export function KnowledgeGraphView({
               const lit = !focus || near.has(n.id)
               const sel = n.id === selected
               const color = n.kind === 'note' ? colorOf(n.folder) : n.kind === 'criterion' ? 'var(--teal)' : 'var(--muted-foreground)'
-              const r = n.kind === 'note' ? Math.min(18, 6 + Math.sqrt(n.size) / 14) : n.kind === 'folder' ? 9 : 7 + Math.min(6, n.size)
+              const r = z * (n.kind === 'note' ? Math.min(18, 6 + Math.sqrt(n.size) / 14) : n.kind === 'folder' ? 9 : 7 + Math.min(6, n.size))
               const showLabel = labelAll || sel || n.kind !== 'note' || (focus && near.has(n.id))
               return (
                 <g
                   key={n.id}
                   transform={`translate(${p.x} ${p.y})`}
-                  style={{ opacity: lit ? 1 : 0.2, transition: 'opacity .3s ease', cursor: n.kind === 'note' ? 'pointer' : 'grab' }}
+                  style={{ opacity: lit ? 1 : 0.2, transition: 'opacity .3s ease', cursor: n.kind === 'criterion' ? 'grab' : 'pointer' }}
                   onPointerDown={(e) => onDown(e, n.id)}
                   onPointerUp={(e) => {
                     e.stopPropagation()
@@ -279,27 +320,30 @@ export function KnowledgeGraphView({
                   onPointerLeave={() => setHover(null)}
                 >
                   <title>{n.kind === 'folder' ? `${t('wiki.folder')}: ${n.folder}` : n.title}</title>
+                  {sel && (
+                    <circle r={r + 7 * z} fill="none" strokeWidth={2 * z} className="rc-pulse" style={{ stroke: 'var(--primary)' }} />
+                  )}
                   {n.kind === 'note' && (
                     <circle r={r} strokeWidth={sel ? 3 : 1.5} style={{ fill: color, stroke: sel ? 'var(--foreground)' : 'var(--background)' }} />
                   )}
                   {n.kind === 'folder' && (
-                    <rect x={-r} y={-r} width={r * 2} height={r * 2} strokeWidth={1.5} style={{ fill: 'var(--card)', stroke: color }} />
+                    <rect x={-r} y={-r} width={r * 2} height={r * 2} strokeWidth={sel ? 3 : 1.5} style={{ fill: 'var(--card)', stroke: color }} />
                   )}
                   {n.kind === 'criterion' && (
                     <polygon points={`0,${-r} ${r},0 0,${r} ${-r},0`} strokeWidth={1.5} style={{ fill: 'var(--card)', stroke: color }} />
                   )}
                   {showLabel && (
                     <text
-                      y={r + 13 / fit.s}
+                      y={r + (13 * z) / fit.s}
                       textAnchor="middle"
-                      fontSize={(n.kind === 'note' ? 12.5 : 11) / fit.s}
+                      fontSize={((n.kind === 'note' ? 12.5 : 11) * z) / fit.s}
                       style={{
                         fill: n.kind === 'note' ? 'var(--foreground)' : 'var(--muted-foreground)',
                         fontFamily: n.kind === 'note' ? 'var(--font-sans)' : 'var(--font-mono)',
                         fontWeight: sel ? 600 : 400,
                         paintOrder: 'stroke',
                         stroke: 'var(--background)',
-                        strokeWidth: 3 / fit.s,
+                        strokeWidth: (3 * z) / fit.s,
                       }}
                     >
                       {n.title.length > 34 ? n.title.slice(0, 33) + '…' : n.title}
@@ -311,6 +355,7 @@ export function KnowledgeGraphView({
           </g>
           </g>
         </svg>
+        {!compact && (
         <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[70%] flex-wrap gap-x-4 gap-y-1.5 border bg-popover/90 px-3 py-2 font-mono text-[0.6875rem] text-muted-foreground">
           {tops.map((f) => (
             <span key={f || '/'} className="flex items-center gap-1.5">
@@ -327,6 +372,7 @@ export function KnowledgeGraphView({
             {t('wiki.graphLink')}
           </span>
         </div>
+        )}
       </div>
     </div>
   )

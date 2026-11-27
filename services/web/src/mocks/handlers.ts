@@ -16,7 +16,17 @@ import {
   setSession,
   uid,
 } from './data'
-import { detail as wikiDetail, graph as wikiGraph } from './wiki'
+import {
+  folderList,
+  movePath,
+  normFolder,
+  parentOf,
+  renameLinks,
+  search as wikiSearch,
+  detail as wikiDetail,
+  graph as wikiGraph,
+  within,
+} from './wiki'
 
 const A = (p: string) => `*/api${p}`
 
@@ -643,7 +653,61 @@ export const handlers = [
   ),
   http.get(
     A('/knowledge/graph'),
-    guard(() => HttpResponse.json(wikiGraph(db.knowledge))),
+    guard(() => HttpResponse.json(wikiGraph(db.knowledge, db.knowledgeFolders))),
+  ),
+  http.get(
+    A('/knowledge/search'),
+    guard(({ request }: { request: Request }) => {
+      const url = new URL(request.url)
+      return HttpResponse.json(wikiSearch(db.knowledge, url.searchParams.get('q') ?? '', Number(url.searchParams.get('limit') ?? 20)))
+    }),
+  ),
+  http.get(
+    A('/knowledge/folders'),
+    guard(() => HttpResponse.json(folderList(db.knowledge, db.knowledgeFolders))),
+  ),
+  http.post(
+    A('/knowledge/folders'),
+    guard(async ({ request }: { request: Request }) => {
+      const path = normFolder(((await request.json()) as { path?: string }).path ?? '')
+      if (!path) return err(400, 'Укажите название папки', 'folder_required')
+      if (folderList(db.knowledge, db.knowledgeFolders).some((f) => f.path === path))
+        return err(409, `Папка «${path}» уже есть`, 'folder_exists')
+      db.knowledgeFolders.push(path)
+      logAudit('knowledge_folder_created', path)
+      return HttpResponse.json({ path, notes: 0, total: 0, explicit: true }, { status: 201 })
+    }),
+  ),
+  http.patch(
+    A('/knowledge/folders'),
+    guard(async ({ request }: { request: Request }) => {
+      const body = (await request.json()) as { path?: string; new_path?: string }
+      const from = normFolder(body.path ?? '')
+      const to = normFolder(body.new_path ?? '')
+      if (!from || !to) return err(400, 'Укажите название папки', 'folder_required')
+      const existing = folderList(db.knowledge, db.knowledgeFolders).map((f) => f.path)
+      if (!existing.includes(from)) return err(404, 'Папка не найдена', 'not_found')
+      if (from === to) return HttpResponse.json({ path: to, moved: 0 })
+      if (within(to, from)) return err(400, 'Нельзя перенести папку внутрь неё самой', 'folder_into_itself')
+      if (existing.includes(to)) return err(409, `Папка «${to}» уже есть`, 'folder_exists')
+      const moved = moveSubtree(from, to)
+      if (!db.knowledgeFolders.includes(to)) db.knowledgeFolders.push(to)
+      logAudit('knowledge_folder_moved', from, { to, notes: moved })
+      return HttpResponse.json({ path: to, moved })
+    }),
+  ),
+  http.delete(
+    A('/knowledge/folders'),
+    guard(({ request }: { request: Request }) => {
+      const path = normFolder(new URL(request.url).searchParams.get('path') ?? '')
+      if (!folderList(db.knowledge, db.knowledgeFolders).some((f) => f.path === path))
+        return err(404, 'Папка не найдена', 'not_found')
+      const parent = parentOf(path)
+      db.knowledgeFolders = db.knowledgeFolders.filter((f) => f !== path)
+      const moved = moveSubtree(path, parent)
+      logAudit('knowledge_folder_deleted', path, { to: parent, notes: moved })
+      return HttpResponse.json({ path: parent, moved })
+    }),
   ),
   http.get(
     A('/knowledge/:id'),
@@ -660,7 +724,19 @@ export const handlers = [
       const body = (await request.json()) as { title?: string; text?: string; folder?: string }
       if (item.source === 'builtin' && (body.title !== undefined || body.text !== undefined))
         return err(409, 'Встроенный материал можно только перенести в другую папку', 'builtin_protected')
-      if (body.title !== undefined) item.title = body.title
+      if (body.title !== undefined && body.title !== item.title) {
+        if ((body as { update_links?: boolean }).update_links !== false) {
+          const me = wikiDetail(db.knowledge, item.id)
+          for (const b of me?.backlinks ?? []) {
+            const other = db.knowledge.find((k) => k.id === b.id)
+            if (other && other.source !== 'builtin') {
+              other._content = renameLinks(other._content, item.title, body.title)
+              other.updated_at = new Date().toISOString()
+            }
+          }
+        }
+        item.title = body.title
+      }
       if (body.folder !== undefined) item.folder = body.folder.split('/').map((p) => p.trim()).filter(Boolean).join('/')
       if (body.text !== undefined) {
         item._content = body.text
@@ -745,6 +821,21 @@ export const handlers = [
     }),
   ),
 ]
+
+/** Перенос поддерева папок: заметки и явные папки внутри «from» получают префикс «to». */
+function moveSubtree(from: string, to: string): number {
+  let moved = 0
+  const now = new Date().toISOString()
+  db.knowledge.forEach((k) => {
+    if (within(k.folder ?? '', from)) {
+      k.folder = movePath(k.folder ?? '', from, to)
+      k.updated_at = now
+      moved++
+    }
+  })
+  db.knowledgeFolders = [...new Set(db.knowledgeFolders.map((f) => movePath(f, from, to)).filter(Boolean))]
+  return moved
+}
 
 function strip<T extends object>(o: T): T {
   const out: Record<string, unknown> = {}

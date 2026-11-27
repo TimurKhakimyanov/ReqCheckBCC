@@ -329,6 +329,31 @@ export interface KnowledgePatch {
   title?: string
   text?: string
   folder?: string
+  /** При смене названия поправить [[ссылки]] в других заметках (по умолчанию да) */
+  update_links?: boolean
+}
+
+export interface KnowledgeFolder {
+  path: string
+  /** Заметок прямо в папке */
+  notes: number
+  /** Заметок в папке и во вложенных */
+  total: number
+  /** Создана явно (может быть пустой) */
+  explicit: boolean
+}
+
+export interface KnowledgeFolderOp {
+  path: string
+  moved: number
+}
+
+export interface KnowledgeSearchHit {
+  id: string
+  title: string
+  folder: string
+  snippet: string
+  score: number
 }
 
 export interface KnowledgeGraphNode {

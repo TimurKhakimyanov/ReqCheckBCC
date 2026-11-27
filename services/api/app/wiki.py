@@ -28,6 +28,92 @@ def _key(title: str) -> str:
     return " ".join(title.lower().replace("ё", "е").split())
 
 
+def ancestors(folder: str) -> list[str]:
+    """«a/b/c» → [«a», «a/b», «a/b/c»]."""
+    parts = folder.split("/") if folder else []
+    return ["/".join(parts[: i + 1]) for i in range(len(parts))]
+
+
+def parent_of(folder: str) -> str:
+    return folder.rsplit("/", 1)[0] if "/" in folder else ""
+
+
+def within(path: str, folder: str) -> bool:
+    """Путь — сама папка или вложен в неё."""
+    return path == folder or path.startswith(folder + "/")
+
+
+def move_path(path: str, old: str, new: str) -> str:
+    """Перенос поддерева: путь внутри «old» получает префикс «new»; остальные пути не меняются."""
+    if path == old:
+        return new
+    if path.startswith(old + "/"):
+        rest = path[len(old) + 1 :]
+        return f"{new}/{rest}" if new else rest
+    return path
+
+
+def rename_links(text: str, old_title: str, new_title: str) -> str:
+    """[[Старое]], [[Старое|подпись]], [[папка/Старое]] → [[Новое…]] — после переименования заметки."""
+    old = _key(old_title)
+
+    def repl(m: re.Match[str]) -> str:
+        target, sep, alias = m.group(1).partition("|")
+        bare = target.strip()
+        if _key(bare) != old and _key(bare.rsplit("/", 1)[-1]) != old:
+            return m.group(0)
+        return f"[[{new_title}{sep}{alias}]]"
+
+    return _LINK.sub(repl, text or "")
+
+
+@dataclass
+class SearchHit:
+    id: str
+    title: str
+    folder: str
+    snippet: str
+    score: float
+
+
+_MD_NOISE = re.compile(r"\|?\s*:?-{3,}:?\s*|[#*_`>|]+")
+
+
+def plain_text(text: str) -> str:
+    """Текст без разметки Markdown для фрагментов поиска: [[Цель|подпись]] → подпись, без #, *, |, ---."""
+    text = _LINK.sub(lambda m: m.group(1).split("|", 1)[-1].strip(), text or "")
+    return " ".join(_MD_NOISE.sub(" ", text).split())
+
+
+def _snippet(text: str, pos: int, width: int = 160) -> str:
+    start = max(0, pos - width // 3)
+    end = min(len(text), start + width)
+    s = " ".join(text[start:end].split())
+    return ("…" if start > 0 else "") + s + ("…" if end < len(text) else "")
+
+
+def search_notes(notes: Iterable["Note"], query: str, limit: int = 20) -> list[SearchHit]:
+    """Полнотекстовый поиск по названию, папке и тексту: все слова запроса должны встретиться.
+    Совпадение в названии весит больше; фрагмент — вокруг первого найденного слова в тексте."""
+    words = _key(query).split()
+    if not words:
+        return []
+    hits: list[SearchHit] = []
+    for n in notes:
+        title, body = _key(n.title), (n.content or "").lower().replace("ё", "е")
+        hay = f"{title} {_key(n.folder)} {body}"
+        if not all(w in hay for w in words):
+            continue
+        score = sum(3.0 if w in title else 0.0 for w in words) + sum(min(5, body.count(w)) * 0.2 for w in words)
+        plain = plain_text(n.content)
+        low = plain.lower().replace("ё", "е")
+        positions = [p for p in (low.find(w) for w in words) if p >= 0]
+        snippet = _snippet(plain, min(positions) if positions else 0)
+        hits.append(SearchHit(n.id, n.title, n.folder, snippet, round(score, 2)))
+    hits.sort(key=lambda h: (-h.score, h.title.lower()))
+    return hits[:limit]
+
+
 def extract_links(text: str) -> list[str]:
     """Цели ссылок [[Заметка]], [[Заметка|подпись]], [[папка/Заметка]] — по порядку, без повторов.
     Цель возвращается как написана (с папкой): в названии самой заметки тоже может быть «/» (ISO/IEC/IEEE)."""
@@ -89,7 +175,15 @@ def resolve_links(notes: Iterable[Note]) -> dict[str, list[tuple[str, str | None
     return {n.id: [(t, find(t)) for t in extract_links(n.content)] for n in notes}
 
 
-def build_graph(notes: Iterable[Note]) -> dict:
+def all_folders(notes: Iterable[Note], explicit: Iterable[str] = ()) -> list[str]:
+    """Все папки вики: явно созданные и те, где лежат заметки, вместе с родителями."""
+    out: set[str] = set()
+    for f in [*(n.folder for n in notes), *explicit]:
+        out.update(ancestors(f))
+    return sorted(out)
+
+
+def build_graph(notes: Iterable[Note], explicit_folders: Iterable[str] = ()) -> dict:
     """Узлы: заметки, папки и упомянутые критерии; рёбра: заметка→заметка (ссылка), заметка→критерий,
     заметка→папка (вложенность), папка→родительская папка."""
     notes = list(notes)
@@ -103,14 +197,9 @@ def build_graph(notes: Iterable[Note]) -> dict:
             seen_edges.add((src, dst, kind))
             edges.append({"source": src, "target": dst, "kind": kind})
 
-    folders: set[str] = set()
-    for n in notes:
-        if n.folder:
-            parts = n.folder.split("/")
-            for i in range(1, len(parts) + 1):
-                folders.add("/".join(parts[:i]))
-    for f in sorted(folders):
-        nodes.append({"id": f"folder:{f}", "kind": "folder", "title": f.rsplit("/", 1)[-1], "folder": f, "size": 0})
+    for f in all_folders(notes, explicit_folders):
+        size = sum(1 for n in notes if within(n.folder, f))
+        nodes.append({"id": f"folder:{f}", "kind": "folder", "title": f.rsplit("/", 1)[-1], "folder": f, "size": size})
         if "/" in f:
             edge(f"folder:{f}", f"folder:{f.rsplit('/', 1)[0]}", "folder")
 
