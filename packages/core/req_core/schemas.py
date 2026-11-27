@@ -31,6 +31,8 @@ class Issue(BaseModel):
     explanation: str = Field(default="", description="Что не так и чем это мешает разработке/тестированию")
     quotes: list[str] = Field(default_factory=list, description="1–3 дословные цитаты из документа")
     suggestion: str = Field(default="", description="Исправленная формулировка или что добавить")
+    question: str = Field(default="", description="Закрытый уточняющий вопрос автору ТЗ; пусто, если не нужен")
+    addressee: str = Field(default="", description="Кто отвечает на вопрос: Аналитик, Архитектор, ИБ…")
 
 
 class RequirementNA(BaseModel):
@@ -49,24 +51,45 @@ class SetCheck(BaseModel):
     comment: str = ""
 
 
-class SetConsistencyResult(BaseModel):
+class RoleReviewResult(BaseModel):
+    """Ответ рецензента набора с одной из ролей (логика правил, спецификации, аналитик, QA, архитектор, ИБ)."""
+
+    analysis: str = Field(default="", description="Рабочие заметки: что сверено и с каким итогом, до 350 слов")
+    checks: list[SetCheck] = Field(default_factory=list, description="Вердикт по каждому своему критерию набора")
     issues: list[Issue] = Field(default_factory=list)
 
 
-class SetReviewResult(BaseModel):
-    issues: list[Issue] = Field(default_factory=list)
-    checks: list[SetCheck] = Field(default_factory=list)
-
-
-class CriticVerdict(BaseModel):
+class VerifierDecision(BaseModel):
     finding_id: str = ""
-    keep: bool = True
-    severity: str = Field(default="", description="Новая критичность critical|major|minor или пусто — без изменений")
+    verdict: str = Field(default="keep", description="keep — подтверждено текстом; drop — отклонить")
+    severity: str = Field(default="", description="critical|major|minor — подтверждённая или исправленная критичность")
     reason: str = ""
 
 
-class CriticResult(BaseModel):
-    verdicts: list[CriticVerdict] = Field(default_factory=list)
+class VerifierResult(BaseModel):
+    decisions: list[VerifierDecision] = Field(default_factory=list)
+
+
+class DuplicateGroup(BaseModel):
+    ids: list[str] = Field(default_factory=list, description="Id замечаний, описывающих один и тот же дефект")
+    reason: str = ""
+
+
+class DedupResult(BaseModel):
+    groups: list[DuplicateGroup] = Field(default_factory=list)
+
+
+class QuestionDraft(BaseModel):
+    question: str = ""
+    why: str = Field(default="", description="Что заблокировано без ответа")
+    addressee: str = ""
+    priority: str = Field(default="important", description="blocker | important | minor")
+    finding_ids: list[str] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list, description="2–4 варианта ответа")
+
+
+class QuestionsResult(BaseModel):
+    questions: list[QuestionDraft] = Field(default_factory=list)
 
 
 class ChecklistLLMItem(BaseModel):

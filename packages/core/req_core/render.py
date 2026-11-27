@@ -20,6 +20,7 @@ from req_contracts import (
     Finding,
     FindingScope,
     FindingSource,
+    QuestionPriority,
     Report,
     RequirementKind,
     Severity,
@@ -40,6 +41,8 @@ SEV_RU = {Severity.CRITICAL: "Критично", Severity.MAJOR: "Существ
 VERDICT_RU = {CheckVerdict.PASS: "✔ соответствует", CheckVerdict.FAIL: "✘ нарушение",
               CheckVerdict.NOT_APPLICABLE: "— неприменимо"}
 ANSWER_RU = {ChecklistAnswer.YES: "Да", ChecklistAnswer.NO: "Нет", ChecklistAnswer.NOT_REQUIRED: "Не требуется"}
+PRIORITY_RU = {QuestionPriority.BLOCKER: "Блокирующий", QuestionPriority.IMPORTANT: "Важный",
+               QuestionPriority.MINOR: "Желательный"}
 
 
 def _one_line(s: str) -> str:
@@ -217,8 +220,25 @@ def render_markdown(report: Report) -> str:
             for i, c in enumerate(report.checklist, 1)
         ]) + [""]
 
-    # 6. Сводка
+    # Уточняющие вопросы автору
     n = 6 if report.checklist else 5
+    if report.questions:
+        L += [f"## {n}. Уточняющие вопросы автору документа", ""]
+        L += ["Без ответов на эти вопросы команда не может однозначно реализовать и протестировать требования. "
+              "Сначала — блокирующие.", ""]
+        for q in report.questions:
+            L += [f"#### {q.id} · {PRIORITY_RU[q.priority]} · кому: {_one_line(q.addressee)}", ""]
+            L.append(f"- **Вопрос:** {_one_line(q.question)}")
+            L.append(f"- **Почему важно:** {_one_line(q.why)}")
+            if q.options:
+                L.append("- **Варианты ответа:** " + "; ".join(f"({chr(0x430 + i)}) {_one_line(o)}"
+                                                            for i, o in enumerate(q.options)))
+            if q.finding_ids:
+                L.append(f"- **Связанные дефекты:** {', '.join(q.finding_ids)}")
+            L.append("")
+        n += 1
+
+    # Сводка
     s = report.summary
     verified = sum(1 for f in report.findings if any(loc.verified for loc in f.locations))
     L += [f"## {n}. Сводка", ""]
@@ -247,7 +267,7 @@ def render_markdown(report: Report) -> str:
     else:
         L += ["Критичных дефектов не найдено.", ""]
 
-    # 7. Итог
+    # Итог
     c = report.conclusion
     L += [f"## {n + 1}. Итог", ""]
     L += [f"- **Можно начинать разработку:** {'да' if c.ready_for_development else 'нет'}",
@@ -259,7 +279,9 @@ def render_markdown(report: Report) -> str:
 
     L += ["---", "",
           f"*Методика: нарезка требований (LLM + правила), детерминированные проверки (размытые слова, «TBD», "
-          f"пустые поля шаблона, версия), проверка каждого требования и набора моделью, проверка цитат кодом. "
+          f"пустые поля шаблона, версия), проверка каждого требования моделью, проверка набора шестью "
+          f"рецензентами с разными ролями, проверка цитат кодом, верификатор (опровержение и слияние дублей), "
+          f"уточняющие вопросы автору. "
           f"Агент ReqCheck {p.agent_version}, схема отчёта {report.schema_version}.*", ""]
     return "\n".join(L)
 

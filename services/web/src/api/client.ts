@@ -10,7 +10,10 @@ import type {
   FindingReview,
   FindingWithReview,
   Health,
+  KnowledgeDetail,
+  KnowledgeGraph,
   KnowledgeItem,
+  KnowledgePatch,
   ModelsResponse,
   Page,
   ProviderId,
@@ -184,13 +187,18 @@ export const api = {
   search: (params: { q: string; kind?: 'requirement' | 'finding'; limit?: number }) =>
     request<SearchHit[]>(`/search${qs(params)}`),
   knowledge: () => request<KnowledgeItem[]>('/knowledge'),
-  uploadKnowledge: (file: File) => {
+  uploadKnowledge: (file: File, folder = '') => {
     const form = new FormData()
     form.append('file', file)
+    if (folder) form.append('folder', folder)
     return upload<KnowledgeItem>('/knowledge', form)
   },
-  addKnowledgeText: (title: string, text: string) =>
-    request<KnowledgeItem>('/knowledge', { method: 'POST', json: { title, text } }),
+  addKnowledgeText: (title: string, text: string, folder = '') =>
+    request<KnowledgeItem>('/knowledge', { method: 'POST', json: { title, text, folder } }),
+  knowledgeItem: (id: string) => request<KnowledgeDetail>(`/knowledge/${id}`),
+  updateKnowledge: (id: string, body: KnowledgePatch) =>
+    request<KnowledgeItem>(`/knowledge/${id}`, { method: 'PATCH', json: body }),
+  knowledgeGraph: () => request<KnowledgeGraph>('/knowledge/graph'),
   deleteKnowledge: (id: string) => request<void>(`/knowledge/${id}`, { method: 'DELETE' }),
 
   // --- service

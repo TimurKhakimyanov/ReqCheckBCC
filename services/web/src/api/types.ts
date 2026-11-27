@@ -1,7 +1,7 @@
 // Типы HTTP API (docs/api.md). Модели отчёта — в report.gen.ts (генерируются из JSON Schema контракта).
-import type { Criterion, Finding, Report, Severity, Usage } from './report.gen'
+import type { ClarifyingQuestion, Criterion, Finding, QuestionPriority, Report, Severity, Usage } from './report.gen'
 
-export type { Criterion, Finding, Report, Severity, Usage }
+export type { ClarifyingQuestion, Criterion, Finding, QuestionPriority, Report, Severity, Usage }
 export type {
   CheckVerdict,
   ChecklistAnswer,
@@ -212,13 +212,16 @@ export interface ValidationOptions {
   verify_pass?: boolean
   split_compound?: boolean
   fill_checklist?: boolean
+  /** Уточняющие вопросы автору документа (раздел «Вопросы» отчёта) */
+  ask_questions?: boolean
 }
 
 export const DEFAULT_OPTIONS: Required<ValidationOptions> = {
   language: 'ru',
-  verify_pass: false,
+  verify_pass: true,
   split_compound: true,
   fill_checklist: true,
+  ask_questions: true,
 }
 
 export interface RunSummary {
@@ -307,6 +310,39 @@ export interface KnowledgeItem {
   status: 'indexing' | 'ready' | 'failed'
   created_at: string
   error?: string | null
+  /** Папка вики «Стандарты/ISO 29148»; пусто — корень */
+  folder?: string
+  updated_at?: string | null
+  /** Длина текста заметки */
+  chars?: number
+}
+
+/** Заметка целиком: текст, ссылки [[…]], обратные ссылки и упомянутые критерии. */
+export interface KnowledgeDetail extends KnowledgeItem {
+  content: string
+  links: { title: string; id: string | null }[]
+  backlinks: { id: string; title: string }[]
+  criteria: string[]
+}
+
+export interface KnowledgePatch {
+  title?: string
+  text?: string
+  folder?: string
+}
+
+export interface KnowledgeGraphNode {
+  id: string
+  kind: 'note' | 'folder' | 'criterion'
+  title: string
+  folder: string
+  source?: string | null
+  size: number
+}
+
+export interface KnowledgeGraph {
+  nodes: KnowledgeGraphNode[]
+  edges: { source: string; target: string; kind: 'link' | 'criterion' | 'folder' }[]
 }
 
 export interface UsageRow extends Usage {

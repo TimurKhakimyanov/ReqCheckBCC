@@ -331,11 +331,11 @@ def test_extra_body_everywhere_and_set_review_override(sample_path):
 
     def is_set(kw):
         u = kw["messages"][-1]["content"]
-        return "найди противоречия" in u or "оцени набор требований целиком" in u
+        return "Ты смотришь на НАБОР" in u  # рецензенты набора (6 ролей)
 
     set_calls = [k for k in echo.calls if is_set(k)]
     other = [k for k in echo.calls if not is_set(k)]
-    assert len(set_calls) == 2 and other
+    assert len(set_calls) == 6 and other
     assert all(k["extra_body"] == THINK_ON for k in set_calls)
     assert all(k["extra_body"] == THINK_OFF for k in other)
     assert all(k["max_tokens"] == 48_000 for k in echo.calls)

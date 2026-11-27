@@ -54,7 +54,7 @@ def test_exception_from_on_progress_aborts_pipeline(sample_path, monkeypatch):
         validate_document(sample_path, ProviderConfig(provider=ProviderName.GEMINI, model="m"),
                           on_progress=_cancel_after(RunStage.CHECKING_REQUIREMENTS, 2, events))
     schemas = [c["schema"] for c in llm.calls if c["kind"] == "json"]
-    assert "SetConsistencyResult" not in schemas  # после отмены модель больше не вызывается
+    assert "RoleReviewResult" not in schemas  # после отмены модель больше не вызывается
     assert events[-1].stage == RunStage.CHECKING_REQUIREMENTS
 
 

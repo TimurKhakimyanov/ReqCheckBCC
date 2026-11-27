@@ -38,14 +38,14 @@
 
 ## 3. Контракты (`packages/contracts/req_contracts`)
 
-Владелец — `main`. Менять только согласованно, с подъёмом `SCHEMA_VERSION` (сейчас `"1.0"`).
+Владелец — `main`. Менять только согласованно, с подъёмом `SCHEMA_VERSION` (сейчас `"1.1"`).
 JSON Schema отчёта: `req_contracts/fixtures/report.schema.json`; пример отчёта: `req_contracts/fixtures/sample_report.json`.
 
 **`Report`** (`report.py`):
 `schema_version`, `passport: RunPassport` (document_name, document_sha256, run_at, provider, model, agent_version,
 standards), `document: ParsedDocument` (name, format, sha256, **text**, page_offsets), `requirements: [Requirement]`,
 `requirement_assessments: [RequirementAssessment]`, `set_assessment: SetAssessment`, `findings: [Finding]`,
-`checklist: [ChecklistItem]`, `summary: Summary`, `conclusion: Conclusion`, `usage: Usage`.
+`checklist: [ChecklistItem]`, `questions: [ClarifyingQuestion]` (с 1.1), `summary: Summary`, `conclusion: Conclusion`, `usage: Usage`.
 
 - `Requirement`: `id` (`R-001`, подтребования `R-002.1`), `source_id` (id в документе, напр. «Ф-1»), `parent_id`,
   `kind` (functional, non_functional, data, integration, api, ui, acceptance, other), `summary`, `location`.
@@ -55,6 +55,8 @@ standards), `document: ParsedDocument` (name, format, sha256, **text**, page_off
   `page` (для PDF), `verified` — цитата найдена в тексте кодом.
 - `CriterionCheck`: `criterion`, `verdict` (pass | fail | not_applicable), `comment`, `finding_ids`.
 - `Conclusion`: `ready_for_development`, `ready_for_testing`, `rationale`, `top_fixes`.
+- `ClarifyingQuestion`: `id` (`Q-01`), `question`, `why`, `addressee`, `priority` (blocker | important | minor),
+  `finding_ids`, `options` (2–4 варианта ответа).
 - `Usage`: `llm_calls`, `prompt_tokens`, `completion_tokens`, `cost_usd` (пока не считается), `duration_s`.
 
 **`Criterion`** (`criteria.py`) — 18 кодов; описания и ссылки на пункты стандартов — в `CRITERIA`:
@@ -83,8 +85,8 @@ standards), `document: ParsedDocument` (name, format, sha256, **text**, page_off
 | `extra_body` | `None` | доп. поля тела запроса OpenAI-совместимого сервера |
 | `extra_body_set_review` | `None` | переопределение `extra_body` только для проверки набора; `None` — как `extra_body` |
 
-**`ValidationOptions`**: `language="ru"`, `verify_pass=False` (проход-критик), `split_compound=True`,
-`fill_checklist=True`, `knowledge_snippets=[]` (RAG-фрагменты в промпт), `batch_size=6`, `concurrency=1`.
+**`ValidationOptions`**: `language="ru"`, `verify_pass=True` (верификатор), `split_compound=True`,
+`fill_checklist=True`, `ask_questions=True`, `max_questions=15`, `knowledge_snippets=[]` (RAG-фрагменты в промпт), `batch_size=6`, `concurrency=1`.
 
 ## 4. Публичный интерфейс ядра (`req_core/__init__.py`)
 
@@ -108,11 +110,19 @@ answer_question(report: Report, history: list[ChatMessage], question: str, llm: 
 3. Правила без LLM (`rules.rule_findings`): размытые слова RU/EN, «TBD / заполняются позже», пустые поля шаблона,
    версия документа.
 4. Проверка требований пакетами по 10 критериям (`check_requirements`, схема `RequirementBatchResult`).
-5. Проверка набора (`check_set`): согласованность (`SetConsistencyResult`) и полнота/8 критериев (`SetReviewResult`);
-   здесь применяется `extra_body_set_review`.
+5. Проверка набора (`check_set`): шесть рецензентов с разными ролями (`prompts.REVIEW_ROLES`, схема
+   `RoleReviewResult`) — контролёр логики правил, контролёр согласованности спецификаций, системный аналитик,
+   тест-аналитик, архитектор интеграций, аналитик рисков и ИБ; каждый отвечает за свои критерии набора, сначала пишет
+   рабочие заметки (`analysis`), может предложить вопрос автору. Параллельно по `concurrency`; здесь применяется
+   `extra_body_set_review`.
 6. Проверка цитат кодом (`resolve_quotes`, `text.QuoteLocator`): цитата ищется в тексте (нормализация, нечёткий
    поиск); не найдена — дефект привязывается к месту требования с пометкой, а без требования отбрасывается.
-7. Дедупликация, опционально критик (`verify_pass`, `CriticResult`), нумерация `D-xxx`, чек-лист, сводка, итог.
+7. Дедупликация кодом; при `verify_pass` (по умолчанию) — верификатор (`verify`, `VerifierResult`): пытается
+   опровергнуть каждый дефект, выравнивает критичность (дефекты правил не отклоняет), затем слияние дублей в два
+   прохода (`llm_dedup`, `DedupResult`): по всему списку и по замечаниям об одном месте; код сливает только
+   связанные замечания (одно место, общее требование или один критерий набора).
+8. Нумерация `D-xxx`, чек-лист, уточняющие вопросы (`clarifying_questions`, `QuestionsResult`; без ответа модели —
+   вопросы рецензентов), сводка, итог.
 
 **Куда встраивать новую проверку / своего агента-проверяльщика:**
 - Детерминированная проверка — дописать в `rules.rule_findings`, вернуть `FindingDraft` с `spans`

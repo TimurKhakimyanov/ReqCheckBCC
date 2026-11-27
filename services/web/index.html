@@ -8,7 +8,7 @@
     <script>
       // Тема до первой отрисовки, чтобы не мигало.
       try {
-        var t = localStorage.getItem('reqcheck.theme') || 'system'
+        var t = localStorage.getItem('reqcheck.theme') || 'dark'
         var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
         document.documentElement.classList.toggle('dark', dark)
       } catch (e) {}

@@ -6,7 +6,6 @@ import type {
   ChatMessage,
   DocumentItem,
   FindingReview,
-  KnowledgeItem,
   ProgressEvent,
   ProviderId,
   ProviderSettings,
@@ -15,6 +14,7 @@ import type {
   RunStage,
   User,
 } from '@/api/types'
+import { seedNotes, type MockNote } from './wiki'
 
 /** Как сейчас приходит от бэкенда: сырой текст исключения SDK. Веб показывает его в «Подробностях». */
 export const RAW_400 =
@@ -40,8 +40,8 @@ const PLAN: { stage: RunStage; ms: number; message: string }[] = [
   { stage: 'segmenting', ms: 1000, message: 'Нарезка на требования' },
   { stage: 'rule_checks', ms: 700, message: 'Детерминированные проверки' },
   { stage: 'checking_requirements', ms: 4200, message: 'Проверка требований' },
-  { stage: 'checking_set', ms: 1200, message: 'Проверка набора' },
-  { stage: 'verifying', ms: 800, message: 'Проверка цитат' },
+  { stage: 'checking_set', ms: 1800, message: 'Рецензенты набора: 6 ролей' },
+  { stage: 'verifying', ms: 1200, message: 'Верификатор: перепроверка дефектов и слияние дублей' },
   { stage: 'rendering', ms: 600, message: 'Сводка и выгрузки' },
 ]
 const TOTAL_MS = PLAN.reduce((s, p) => s + p.ms, 0)
@@ -63,7 +63,7 @@ export interface Db {
   reports: Record<string, Report>
   reviews: Record<string, Record<string, FindingReview>>
   chats: Record<string, ChatMessage[]>
-  knowledge: (KnowledgeItem & { _readyAt?: number })[]
+  knowledge: MockNote[]
   audit: AuditEntry[]
   auditSeq: number
   settings: AppSettings & { _embeddingsKey?: string }
@@ -159,11 +159,7 @@ function seed(): Db {
       },
     },
     chats: {},
-    knowledge: [
-      { id: 'kb-builtin', title: 'Критерии ISO/IEC/IEEE 29148 и IEEE 830 (пересказ)', source: 'builtin', chunks: 36, status: 'ready', created_at: ago(500) },
-      { id: 'kb-glossary', title: 'Глоссарий банка', source: 'upload', chunks: 12, status: 'ready', created_at: ago(400) },
-      { id: 'kb-scan', title: 'Шаблон ТЗ (скан).pdf', source: 'upload', chunks: 0, status: 'failed', created_at: ago(380), error: 'В PDF нет текстового слоя — нужен OCR' },
-    ],
+    knowledge: seedNotes(ago),
     audit: [
       { id: 4, ts: ago(60), actor: 'admin', action: 'finding.review', target: `${runId}/D-003`, details: { status: 'accepted' } },
       { id: 3, ts: ago(95), actor: 'admin', action: 'run.create', target: runId, details: { provider: 'gemini' } },

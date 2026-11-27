@@ -9,9 +9,9 @@ export function Progress({ value, className }: { value: number; className?: stri
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(pct)}
-      className={cn('relative h-1.5 w-full overflow-hidden rounded-full bg-muted shadow-inset', className)}
+      className={cn('relative h-1.5 w-full overflow-hidden rounded-full bg-muted', className)}
     >
-      <div className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out" style={{ width: `${pct}%` }} />
+      <div className="h-full rounded-full bg-primary transition-[width] duration-700 ease-out" style={{ width: `${pct}%` }} />
     </div>
   )
 }
@@ -71,7 +71,7 @@ export function EmptyState({
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
       {icon && (
-        <div className="mb-1 flex size-12 items-center justify-center rounded-xl bg-card text-muted-foreground shadow-card [&_svg]:size-5">
+        <div className="mb-1 flex size-12 items-center justify-center rounded-2xl bg-card text-muted-foreground shadow-card [&_svg]:size-5">
           {icon}
         </div>
       )}
@@ -98,7 +98,7 @@ export function PageHeader({
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
         {eyebrow && <div className="label-mono mb-2">{eyebrow}</div>}
-        <h1 className="truncate text-[1.75rem] leading-tight font-medium tracking-[-0.02em]">{title}</h1>
+        <h1 className="truncate text-[2.25rem] leading-tight font-medium tracking-[-0.035em]">{title}</h1>
         {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
@@ -109,7 +109,7 @@ export function PageHeader({
 export function ErrorNote({ error }: { error: unknown }) {
   const msg = error instanceof Error ? error.message : String(error)
   return (
-    <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+    <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
       {msg}
     </div>
   )

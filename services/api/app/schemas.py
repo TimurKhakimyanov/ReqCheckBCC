@@ -232,11 +232,58 @@ class KnowledgeItemOut(BaseModel):
     status: Literal["indexing", "ready", "failed"]
     created_at: datetime
     error: str | None = None
+    folder: str = Field(default="", description="Папка вики: «Стандарты/ISO 29148»; пусто — корень")
+    updated_at: datetime | None = None
+    chars: int = Field(default=0, description="Длина текста заметки")
+
+
+class KnowledgeLinkOut(BaseModel):
+    title: str = Field(description="Цель ссылки [[…]] как написана в тексте")
+    id: str | None = Field(default=None, description="Найденная заметка; None — ссылка на несуществующую заметку")
+
+
+class KnowledgeRef(BaseModel):
+    id: str
+    title: str
+
+
+class KnowledgeDetailOut(KnowledgeItemOut):
+    content: str
+    links: list[KnowledgeLinkOut] = Field(default_factory=list)
+    backlinks: list[KnowledgeRef] = Field(default_factory=list, description="Заметки, которые ссылаются на эту")
+    criteria: list[str] = Field(default_factory=list, description="Коды упомянутых критериев 29148/830")
 
 
 class KnowledgeIn(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     text: str = Field(min_length=1)
+    folder: str = Field(default="", max_length=500)
+
+
+class KnowledgePatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    text: str | None = Field(default=None, min_length=1)
+    folder: str | None = Field(default=None, max_length=500)
+
+
+class GraphNode(BaseModel):
+    id: str
+    kind: Literal["note", "folder", "criterion"]
+    title: str
+    folder: str = ""
+    source: str | None = None
+    size: int = 0
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    kind: Literal["link", "criterion", "folder"]
+
+
+class KnowledgeGraphOut(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
 
 
 # --- service ---

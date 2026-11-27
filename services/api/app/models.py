@@ -137,6 +137,9 @@ class KnowledgeItem(Base):
     status: Mapped[str] = mapped_column(String(16), default="indexing")  # indexing | ready | failed
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # вики: папка «Стандарты/ISO 29148» («» — корень) и время последней правки
+    folder: Mapped[str] = mapped_column(String(500), default="", server_default="", index=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuditLog(Base):

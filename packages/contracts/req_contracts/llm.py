@@ -55,9 +55,13 @@ class EmbeddingProviderName(str, Enum):
 
 class ValidationOptions(BaseModel):
     language: str = "ru"
-    verify_pass: bool = Field(default=False, description="Второй проход «критик» перепроверяет дефекты")
+    verify_pass: bool = Field(
+        default=True, description="Верификатор: пытается опровергнуть каждый дефект и сливает дубли"
+    )
     split_compound: bool = Field(default=True, description="Показывать атомарные подтребования составных")
     fill_checklist: bool = Field(default=True, description="Заполнять чек-лист «Ревью требований» из документа")
+    ask_questions: bool = Field(default=True, description="Готовить уточняющие вопросы автору документа")
+    max_questions: int = Field(default=15, ge=0, le=50, description="Не больше стольких вопросов")
     knowledge_snippets: list[str] = Field(
         default_factory=list, description="Фрагменты базы знаний (RAG), которые воркер подмешивает в промпт"
     )

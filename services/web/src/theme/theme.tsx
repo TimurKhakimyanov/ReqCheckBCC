@@ -1,3 +1,4 @@
+// По умолчанию тёмная тема — основной вид нового дизайна; светлая и системная остаются в переключателе.
 // Переключатель светлой/тёмной темы. Цвета — только в src/index.css (токены), здесь лишь класс .dark на <html>.
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 
@@ -21,7 +22,7 @@ function readMode(): ThemeMode {
   } catch {
     /* ignore */
   }
-  return 'system'
+  return 'dark'
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

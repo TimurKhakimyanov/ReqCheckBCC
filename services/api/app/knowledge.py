@@ -20,6 +20,7 @@ from .indexing import index_report
 from .models import Document, KnowledgeItem, ReportRow, Run
 from .services import Services
 from .vectors import KNOWLEDGE, REQUIREMENTS, point_id
+from .wiki import BUILTIN_FOLDER
 
 log = logging.getLogger(__name__)
 BUILTIN_TITLE = "Критерии качества требований (ISO/IEC/IEEE 29148, IEEE 830) — пересказ"
@@ -103,7 +104,8 @@ def ensure_builtin(svc: Services) -> bool:
     with SessionLocal() as db:
         item = db.scalar(select(KnowledgeItem).where(KnowledgeItem.source == "builtin"))
         if item is None:
-            item = KnowledgeItem(title=BUILTIN_TITLE, source="builtin", content=builtin_text(), status="indexing")
+            item = KnowledgeItem(title=BUILTIN_TITLE, source="builtin", content=builtin_text(), status="indexing",
+                                 folder=BUILTIN_FOLDER)
             db.add(item)
             db.commit()
         if item.status == "ready":

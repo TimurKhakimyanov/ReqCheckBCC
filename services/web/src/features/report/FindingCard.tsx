@@ -1,22 +1,27 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bot, Check, CircleAlert, Copy, MapPin, MessageSquare, Ruler, ShieldQuestion, Wrench } from 'lucide-react'
+import { Bot, Copy, Ruler } from 'lucide-react'
 import { forwardRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import type { Finding, FindingReview, FindingWithReview, ReviewStatus } from '@/api/types'
-import { REVIEW_STATUSES } from '@/api/types'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
-import { SeverityBadge } from '@/features/runs/RunBits'
 import { cn } from '@/shared/utils'
+import { EYEBROW, SEV_VAR } from './ui'
 
-const STATUS_ICON: Record<ReviewStatus, typeof Check> = {
-  open: CircleAlert,
-  accepted: Check,
-  false_positive: ShieldQuestion,
-  fixed: Wrench,
+/** Решения по дефекту: повторное нажатие на выбранное возвращает «не разобран». */
+const DECISIONS: Exclude<ReviewStatus, 'open'>[] = ['accepted', 'false_positive', 'fixed']
+export const STATUS_TONE: Record<ReviewStatus, string> = {
+  open: 'text-muted-foreground',
+  accepted: 'text-teal',
+  false_positive: 'text-muted-foreground',
+  fixed: 'text-sev-major',
+}
+const DECISION_ON: Record<Exclude<ReviewStatus, 'open'>, string> = {
+  accepted: 'border-teal bg-teal text-card',
+  false_positive: 'border-muted-foreground bg-muted-foreground text-card',
+  fixed: 'border-sev-major bg-sev-major text-card',
 }
 
 export function useReviewMutation(runId: string) {
@@ -48,12 +53,15 @@ interface Props {
   review?: FindingReview
   runId: string
   active: boolean
+  /** Где дефект: «Ф-2 · R-002» или раздел документа */
+  where: string
   onSelect: (locIndex?: number) => void
+  onCollapse: () => void
   onRequirement?: (reqId: string) => void
 }
 
-export const FindingCard = forwardRef<HTMLDivElement, Props>(function FindingCard(
-  { finding: f, review, runId, active, onSelect, onRequirement },
+export const FindingCard = forwardRef<HTMLElement, Props>(function FindingCard(
+  { finding: f, review, runId, active, where, onSelect, onCollapse, onRequirement },
   ref,
 ) {
   const { t } = useTranslation()
@@ -62,124 +70,124 @@ export const FindingCard = forwardRef<HTMLDivElement, Props>(function FindingCar
   const [editing, setEditing] = useState(false)
   const mut = useReviewMutation(runId)
 
-  const setStatus = (s: ReviewStatus) => mut.mutate({ findingId: f.id, status: s, comment: comment || undefined })
+  const decide = (s: Exclude<ReviewStatus, 'open'>) =>
+    mut.mutate({ findingId: f.id, status: status === s ? 'open' : s, comment: comment || undefined })
 
   return (
-    <div
+    <article
       ref={ref}
       data-finding={f.id}
       data-active={active}
       onClick={() => !active && onSelect()}
       className={cn(
-        'rounded-xl bg-card p-3.5 text-sm shadow-card transition-shadow',
-        active ? 'shadow-raised ring-[1.5px] ring-primary' : 'cursor-pointer hover:shadow-raised',
-        status !== 'open' && !active && 'opacity-70',
+        'border bg-card text-sm transition-[box-shadow,border-color] duration-200',
+        active ? 'border-foreground' : 'cursor-pointer hover:border-foreground/30',
+        status !== 'open' && !active && 'opacity-75',
       )}
+      style={{ boxShadow: `inset 3px 0 0 ${SEV_VAR[f.severity]}` }}
     >
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="font-mono text-xs font-medium tracking-tight">{f.id}</span>
-        <SeverityBadge severity={f.severity} />
-        <Badge variant="outline" title={t(`criteria.${f.criterion}.description`)}>
-          {t(`criteria.${f.criterion}.title`)}
-        </Badge>
-        {f.source === 'rule' ? (
-          <Badge variant="secondary" title={t('report.sourceRuleHint')}>
-            <Ruler />
-            {t('report.sourceRule')}
-          </Badge>
-        ) : (
-          <Badge variant="secondary" title={t('report.sourceLlmHint')}>
-            <Bot />
-            {t('report.sourceLlm')}
-          </Badge>
-        )}
-        {status !== 'open' && (
-          <Badge variant={status === 'false_positive' ? 'warning' : 'success'} className="ml-auto">
-            {t(`review.${status}`)}
-          </Badge>
-        )}
-      </div>
-      <p className="mt-2 font-medium">{f.title}</p>
-      {(f.requirement_ids?.length ?? 0) > 0 && (
-        <div className="mt-1 flex flex-wrap gap-1 text-xs text-muted-foreground">
-          {t(f.scope === 'set' ? 'report.scopeSet' : 'report.scopeReq')}:
-          {f.requirement_ids!.map((r) => (
-            <button
-              key={r}
-              type="button"
-              className="font-mono text-primary hover:underline"
-              onClick={(e) => {
-                e.stopPropagation()
-                onRequirement?.(r)
-              }}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
-      )}
+      <button
+        type="button"
+        aria-expanded={active}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (active) onCollapse()
+          else onSelect()
+        }}
+        className="rc-focusable flex w-full cursor-pointer flex-col gap-2 py-3 pr-3.5 pl-4 text-left"
+      >
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px]">
+          <span className="text-xs font-semibold text-foreground">{f.id}</span>
+          <span className="border px-1.5 text-foreground/80" title={t(`criteria.${f.criterion}.description`)}>
+            {t(`criteria.${f.criterion}.title`)}
+          </span>
+          {where && <span className="max-w-full truncate text-muted-foreground">{where}</span>}
+          <span className={cn('ml-auto', STATUS_TONE[status])}>{status === 'open' ? t('report.notReviewed') : `● ${t(`review.${status}`)}`}</span>
+        </span>
+        <span className="text-[0.875rem] leading-snug font-medium">{f.title}</span>
+      </button>
 
       {active && (
-        <div className="mt-3 grid gap-3" onClick={(e) => e.stopPropagation()}>
-          <p className="leading-relaxed text-muted-foreground">{f.explanation}</p>
+        <div className="grid gap-3 border-t px-4 pt-3 pb-4" onClick={(e) => e.stopPropagation()}>
           <div className="grid gap-1.5">
             {f.locations.map((loc, i) => (
               <button
                 key={i}
                 type="button"
                 onClick={() => onSelect(i)}
-                className="group rounded-lg border-l-2 border-primary/70 bg-muted px-2.5 py-1.5 text-left hover:bg-accent"
+                className="rc-focusable cursor-pointer border-l-2 bg-secondary px-2.5 py-1.5 text-left text-[0.8125rem] leading-normal transition-colors hover:bg-accent"
+                style={{ borderLeftColor: SEV_VAR[f.severity] }}
               >
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <MapPin className="size-3" />
-                  {loc.section}
-                  {loc.page ? ` · ${t('report.page', { page: loc.page })}` : ''}
-                  {!loc.verified && (
-                    <span className="ml-auto text-warning" title={t('report.unverifiedHint')}>
-                      {t('report.unverified')}
-                    </span>
-                  )}
+                «{loc.quote}»{' '}
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  {[loc.page ? t('report.page', { page: loc.page }) : null, loc.section].filter(Boolean).join(' · ')}
                 </span>
-                <span className="mt-0.5 block italic">«{loc.quote}»</span>
+                {loc.verified === false && (
+                  <span className="mt-0.5 block font-mono text-[11px] text-warning" title={t('report.unverifiedHint')}>
+                    {t('report.unverified')}
+                  </span>
+                )}
               </button>
             ))}
           </div>
+
+          <p className="text-[0.8125rem] leading-relaxed">
+            <span className={cn(EYEBROW, 'mr-2')}>{t('report.why')}</span>
+            <span>{f.explanation}</span>
+          </p>
+
           {f.suggestion && (
-            <div className="rounded-md border border-success/40 bg-success/5 p-2.5">
-              <div className="mb-1 flex items-center justify-between text-xs font-medium text-success">
-                {t('report.suggestion')}
+            <div className="border border-teal/30 bg-teal/5 px-2.5 py-2 text-[0.8125rem] leading-relaxed">
+              <div className="mb-0.5 flex items-center justify-between gap-2">
+                <span className={cn(EYEBROW, 'text-teal')}>{t('report.howToFix')}</span>
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="size-6"
+                  className="size-6 rounded-none"
                   aria-label={t('common.copy')}
                   onClick={() => navigator.clipboard?.writeText(f.suggestion!).then(() => toast.success(t('common.copied')))}
                 >
                   <Copy className="size-3.5" />
                 </Button>
               </div>
-              <p className="leading-relaxed">{f.suggestion}</p>
+              {f.suggestion}
             </div>
           )}
 
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1" title={f.source === 'rule' ? t('report.sourceRuleHint') : t('report.sourceLlmHint')}>
+              {f.source === 'rule' ? <Ruler className="size-3" /> : <Bot className="size-3" />}
+              {f.source === 'rule' ? t('report.sourceRule') : t('report.sourceLlm')}
+            </span>
+            {(f.requirement_ids?.length ?? 0) > 0 && (
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                {t(f.scope === 'set' ? 'report.scopeSet' : 'report.scopeReq')}:
+                {f.requirement_ids!.map((r) => (
+                  <button key={r} type="button" className="cursor-pointer text-sev-major hover:underline" onClick={() => onRequirement?.(r)}>
+                    {r}
+                  </button>
+                ))}
+              </span>
+            )}
+          </div>
+
           <div className="grid gap-2 border-t pt-3">
-            <div className="flex flex-wrap gap-1" role="group" aria-label={t('review.label')}>
-              {REVIEW_STATUSES.map((s) => {
-                const Icon = STATUS_ICON[s]
-                return (
-                  <Button
-                    key={s}
-                    size="sm"
-                    variant={status === s ? 'default' : 'outline'}
-                    aria-pressed={status === s}
-                    disabled={mut.isPending}
-                    onClick={() => setStatus(s)}
-                  >
-                    <Icon />
-                    {t(`review.${s}`)}
-                  </Button>
-                )
-              })}
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('review.label')}>
+              {DECISIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  aria-pressed={status === s}
+                  disabled={mut.isPending}
+                  onClick={() => decide(s)}
+                  className={cn(
+                    'rc-focusable min-h-8 cursor-pointer border px-3 font-mono text-xs transition-colors disabled:opacity-60',
+                    status === s ? DECISION_ON[s] : 'border-input bg-card hover:border-foreground/40',
+                  )}
+                >
+                  {t(`review.${s}`)}
+                </button>
+              ))}
             </div>
             {editing ? (
               <div className="grid gap-2">
@@ -189,13 +197,15 @@ export const FindingCard = forwardRef<HTMLDivElement, Props>(function FindingCar
                   value={comment}
                   placeholder={t('review.commentPlaceholder')}
                   onChange={(e) => setComment(e.target.value)}
+                  className="rounded-none"
                 />
                 <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                  <Button size="sm" variant="ghost" className="rounded-none" onClick={() => setEditing(false)}>
                     {t('common.cancel')}
                   </Button>
                   <Button
                     size="sm"
+                    className="rounded-none"
                     onClick={() => {
                       mut.mutate({ findingId: f.id, status, comment })
                       setEditing(false)
@@ -208,16 +218,22 @@ export const FindingCard = forwardRef<HTMLDivElement, Props>(function FindingCar
             ) : (
               <button
                 type="button"
-                className="flex items-start gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground"
+                className="cursor-pointer self-start text-left text-xs text-sev-major hover:underline"
                 onClick={() => setEditing(true)}
               >
-                <MessageSquare className="mt-0.5 size-3.5 shrink-0" />
-                {review?.comment || t('review.addComment')}
+                {review?.comment ? (
+                  <span className="text-muted-foreground">{review.comment}</span>
+                ) : (
+                  <>
+                    <span aria-hidden>+ </span>
+                    <span>{t('review.addComment')}</span>
+                  </>
+                )}
               </button>
             )}
           </div>
         </div>
       )}
-    </div>
+    </article>
   )
 })

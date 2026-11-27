@@ -65,8 +65,15 @@ answer_question(report: Report, history: list[ChatMessage], question: str, llm: 
 ```
 
 Требования к ядру:
-- Конвейер: парсинг → нарезка → детерминированные проверки → проверка каждого требования → проверка набора →
-  (опц.) проход-критик → **проверка цитат кодом** (`SourceLocation.verified`, смещения в `ParsedDocument.text`) → сводка и итог.
+- Конвейер: парсинг → нарезка → детерминированные проверки → проверка каждого требования → **шесть рецензентов
+  набора с разными ролями** → **проверка цитат кодом** (`SourceLocation.verified`, смещения в `ParsedDocument.text`) →
+  **верификатор** (опровержение каждого дефекта и слияние дублей; `verify_pass`, по умолчанию включён) → чек-лист →
+  **уточняющие вопросы автору** (`Report.questions`) → сводка и итог. Рецензенты, верификатор и вопросы перенесены
+  из bbc-agent.
+- Схема отчёта 1.1 (изменение контракта): добавлено `Report.questions: [ClarifyingQuestion]` — `id` (`Q-01`),
+  `question`, `why`, `addressee`, `priority` (blocker | important | minor), `finding_ids`, `options`. Поле
+  необязательное, отчёты 1.0 читаются без изменений. В `ValidationOptions` — `ask_questions=True`, `max_questions=15`,
+  `verify_pass` теперь по умолчанию `True`.
 - Структурированный вывод LLM через Pydantic-схемы, temperature 0, повторы при ошибке JSON/429.
 - Провайдеры — собственный тонкий слой над официальными SDK (`google-genai`, `openai`, `anthropic`);
   `openai_compatible` = OpenAI SDK с `base_url` (Ollama, vLLM). LiteLLM не используем (лишняя зависимость в банковском контуре).

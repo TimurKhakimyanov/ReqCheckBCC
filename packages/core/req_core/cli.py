@@ -1,7 +1,7 @@
 """CLI агента: одна команда — путь к документу требований и путь к отчёту.
 
     python -m req_core.cli samples/requirements.md reports/report.md
-    python -m req_core.cli doc.pdf report.docx --provider openai --model gpt-6.2-sol --verify
+    python -m req_core.cli doc.pdf report.docx --provider openai --model gpt-6.2-sol
 
 Ключ и параметры LLM передаются при запуске: флагами (--api-key, --base-url, --model …) или переменными
 окружения процесса (GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENAI_COMPATIBLE_API_KEY,
@@ -51,7 +51,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", default=None, help="id модели (по умолчанию LLM_MODEL или рекомендуемая модель)")
     p.add_argument("--format", choices=FORMATS, default=None, help="формат отчёта, если не по расширению")
     p.add_argument("--also", default="", help="доп. форматы рядом с отчётом через запятую, напр. json,docx")
-    p.add_argument("--verify", action="store_true", help="второй проход-критик перепроверяет дефекты")
+    p.add_argument("--no-pdf", action="store_true",
+                   help="не класть PDF рядом с отчётом (по умолчанию PDF создаётся всегда)")
+    p.add_argument("--no-verify", action="store_true",
+                   help="без верификатора (по умолчанию он опровергает каждый дефект и сливает дубли)")
+    p.add_argument("--verify", action="store_true", help=argparse.SUPPRESS)  # совместимость: верификатор и так включён
+    p.add_argument("--no-questions", action="store_true", help="без уточняющих вопросов автору документа")
+    p.add_argument("--max-questions", type=int, default=None, help="не больше стольких вопросов (по умолчанию 15)")
     p.add_argument("--no-split", action="store_true", help="не выделять атомарные подтребования составных")
     p.add_argument("--no-checklist", action="store_true", help="не заполнять чек-лист «Ревью требований»")
     p.add_argument("--api-key", default=None, help="ключ провайдера (иначе — переменная окружения провайдера)")
@@ -102,12 +108,16 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "WARNING").upper(), stream=sys.stderr,
                         format="%(levelname)s %(name)s: %(message)s")
+    if not args.format and not args.output.suffix:  # без расширения — итоговый PDF-отчёт
+        args.output = args.output.with_suffix(".pdf")
     fmt = args.format or args.output.suffix.lower().lstrip(".")
     if fmt not in FORMATS:
         print(f"Не удалось определить формат отчёта по «{args.output.name}»; укажите --format {{{','.join(FORMATS)}}}",
               file=sys.stderr)
         return 2
     extra = [f.strip() for f in args.also.split(",") if f.strip()]
+    if fmt != "pdf" and not args.no_pdf and "pdf" not in extra:
+        extra.append("pdf")  # итоговый PDF-отчёт — всегда, сразу после прогона
     bad = [f for f in extra if f not in FORMATS]
     if bad:
         print(f"Неизвестные форматы в --also: {', '.join(bad)}", file=sys.stderr)
@@ -119,10 +129,11 @@ def main(argv: list[str] | None = None) -> int:
     from . import parse_document, render_report
     from .pipeline import run_pipeline
 
-    opt_extra = {k: v for k, v in {"batch_size": args.batch_size, "concurrency": args.concurrency}.items()
-                 if v is not None}
-    options = ValidationOptions(verify_pass=args.verify, split_compound=not args.no_split,
-                                fill_checklist=not args.no_checklist, **opt_extra)
+    opt_extra = {k: v for k, v in {"batch_size": args.batch_size, "concurrency": args.concurrency,
+                                   "max_questions": args.max_questions}.items() if v is not None}
+    options = ValidationOptions(verify_pass=not args.no_verify, split_compound=not args.no_split,
+                                fill_checklist=not args.no_checklist, ask_questions=not args.no_questions,
+                                **opt_extra)
 
     def on_progress(ev: ProgressEvent) -> None:
         if args.quiet:
