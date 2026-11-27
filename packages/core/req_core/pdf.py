@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fpdf import FPDF
 from fpdf.fonts import FontFace
-from req_contracts import QuestionPriority, Report, Severity
+from req_contracts import Decision, QuestionPriority, Report, Severity
 
 from .render import (
     PRIORITY_RU,
@@ -68,6 +68,8 @@ _REF = re.compile(r"\b[DQR]-\d+(?:\.\d+)?\b")
 def document_title(report: Report) -> str:
     """Название документа: первый заголовок «# …» в начале текста, иначе первая содержательная строка,
     иначе имя файла без расширения."""
+    if report.document_title and report.document_title.strip():
+        return report.document_title.strip()
     lines = [ln.strip() for ln in report.document.text.splitlines()[:60]]
     for ln in lines:
         if re.match(r"^#{1,2}\s+\S", ln):
@@ -188,6 +190,12 @@ class _Pdf(FPDF):
 
 def _verdict(report: Report) -> tuple[str, str, RGB, RGB, RGB]:
     c = report.conclusion
+    if c.decision == Decision.LIMITED:
+        sev = Severity.MINOR
+        return "!", "Можно с ограничениями — по части требований", SEV_COLOR[sev], SEV_TINT[sev], SEV_DARK[sev]
+    if c.decision == Decision.BLOCKED:
+        sev = Severity.CRITICAL
+        return "✕", "Не готово к разработке и тестированию", SEV_COLOR[sev], SEV_TINT[sev], SEV_DARK[sev]
     if c.ready_for_development and c.ready_for_testing:
         return "✓", "Готово к разработке и тестированию", GOOD, GOOD_TINT, GOOD_DARK
     if not c.ready_for_development and not c.ready_for_testing:

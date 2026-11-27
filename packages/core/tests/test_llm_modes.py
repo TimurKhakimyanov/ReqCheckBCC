@@ -324,14 +324,14 @@ def test_extra_body_everywhere_and_set_review_override(sample_path):
     from req_contracts import ValidationOptions
 
     c = L.OpenAILLM(ProviderConfig(provider=ProviderName.OPENAI_COMPATIBLE, model="mimo", base_url=VLLM,
-                                   max_output_tokens=48_000, extra_body=THINK_OFF, extra_body_set_review=THINK_ON))
+                                   max_output_tokens=48_000, context_tokens=131_072, extra_body=THINK_OFF,
+                                   extra_body_set_review=THINK_ON))
     echo = EchoCompletions()
     c.client = NS(chat=NS(completions=echo), models=NS(list=lambda: []))
     run_pipeline(parse_document(sample_path), c, options=ValidationOptions(concurrency=4, batch_size=3))
 
     def is_set(kw):
-        u = kw["messages"][-1]["content"]
-        return "Ты смотришь на НАБОР" in u  # рецензенты набора (6 ролей)
+        return any("в команде ревью технического задания" in m["content"] for m in kw["messages"])  # 6 рецензентов
 
     set_calls = [k for k in echo.calls if is_set(k)]
     other = [k for k in echo.calls if not is_set(k)]

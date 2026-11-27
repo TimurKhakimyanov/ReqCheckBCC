@@ -13,6 +13,7 @@
       "enum": [
         "yes",
         "no",
+        "partial",
         "not_required"
       ],
       "title": "ChecklistAnswer",
@@ -89,6 +90,37 @@
           },
           "title": "Options",
           "type": "array"
+        },
+        "requirement_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requirement Ids",
+          "type": "array"
+        },
+        "answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ответ автора (если прогон запущен с ответами)",
+          "title": "Answer"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuestionResolution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -120,6 +152,52 @@
           },
           "title": "Top Fixes",
           "type": "array"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Нельзя / можно с ограничениями / можно"
+        },
+        "development": {
+          "default": "",
+          "description": "Что можно брать в разработку сейчас, что заблокировано",
+          "title": "Development",
+          "type": "string"
+        },
+        "testing": {
+          "default": "",
+          "description": "По каким требованиям можно писать тест-кейсы",
+          "title": "Testing",
+          "type": "string"
+        },
+        "fixes": {
+          "description": "top_fixes с обоснованием и ссылками",
+          "items": {
+            "$ref": "#/$defs/FixItem"
+          },
+          "title": "Fixes",
+          "type": "array"
+        },
+        "strengths": {
+          "description": "Сильные стороны документа",
+          "items": {
+            "type": "string"
+          },
+          "title": "Strengths",
+          "type": "array"
+        },
+        "guard_note": {
+          "default": "",
+          "description": "Решение ужесточено правилом (например, есть критичные дефекты)",
+          "title": "Guard Note",
+          "type": "string"
         }
       },
       "required": [
@@ -181,6 +259,14 @@
           },
           "title": "Finding Ids",
           "type": "array"
+        },
+        "assessed_by": {
+          "description": "Кто оценил критерий набора (рецензенты)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Assessed By",
+          "type": "array"
         }
       },
       "required": [
@@ -189,6 +275,35 @@
       ],
       "title": "CriterionCheck",
       "type": "object"
+    },
+    "Decision": {
+      "description": "Итоговое решение по документу.",
+      "enum": [
+        "blocked",
+        "limited",
+        "ready"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "DefectType": {
+      "description": "Тип дефекта (методика bbc-agent). Первые три — «критичные» в терминах задания.",
+      "enum": [
+        "unverifiable",
+        "contradictory",
+        "incomplete",
+        "ambiguous",
+        "design",
+        "not_singular",
+        "infeasible",
+        "incorrect",
+        "nonconforming",
+        "untraceable",
+        "redundant",
+        "risk"
+      ],
+      "title": "DefectType",
+      "type": "string"
     },
     "DocumentFormat": {
       "enum": [
@@ -255,6 +370,63 @@
         "source": {
           "$ref": "#/$defs/FindingSource",
           "default": "llm"
+        },
+        "defect_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DefectType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "grounding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Grounding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Лучшая привязка цитат замечания к тексту"
+        },
+        "found_by": {
+          "description": "Агенты, нашедшие дефект (с учётом слитых дублей): inspector, reviewer:qa…",
+          "items": {
+            "type": "string"
+          },
+          "title": "Found By",
+          "type": "array"
+        },
+        "verifier_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Обоснование решения верификатора",
+          "title": "Verifier Note"
+        },
+        "resolved_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Вопрос Q-xx, ответ на который снимает дефект",
+          "title": "Resolved By"
         }
       },
       "required": [
@@ -283,6 +455,41 @@
         "rule"
       ],
       "title": "FindingSource",
+      "type": "string"
+    },
+    "FixItem": {
+      "properties": {
+        "action": {
+          "title": "Action",
+          "type": "string"
+        },
+        "why": {
+          "default": "",
+          "title": "Why",
+          "type": "string"
+        },
+        "finding_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Finding Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "FixItem",
+      "type": "object"
+    },
+    "Grounding": {
+      "description": "Насколько цитата замечания совпала с документом (проверено кодом).",
+      "enum": [
+        "exact",
+        "fuzzy",
+        "line"
+      ],
+      "title": "Grounding",
       "type": "string"
     },
     "ParsedDocument": {
@@ -329,6 +536,150 @@
       "title": "ParsedDocument",
       "type": "object"
     },
+    "QualityStats": {
+      "description": "Контроль достоверности и покрытия прогона.",
+      "properties": {
+        "candidates": {
+          "default": 0,
+          "title": "Candidates",
+          "type": "integer"
+        },
+        "rejected_by_code": {
+          "default": 0,
+          "title": "Rejected By Code",
+          "type": "integer"
+        },
+        "rejected_by_verifier": {
+          "default": 0,
+          "title": "Rejected By Verifier",
+          "type": "integer"
+        },
+        "merged": {
+          "default": 0,
+          "title": "Merged",
+          "type": "integer"
+        },
+        "confirmed": {
+          "default": 0,
+          "title": "Confirmed",
+          "type": "integer"
+        },
+        "unverified": {
+          "default": 0,
+          "title": "Unverified",
+          "type": "integer"
+        },
+        "evidence_exact": {
+          "default": 0,
+          "title": "Evidence Exact",
+          "type": "integer"
+        },
+        "evidence_fuzzy": {
+          "default": 0,
+          "title": "Evidence Fuzzy",
+          "type": "integer"
+        },
+        "evidence_line": {
+          "default": 0,
+          "title": "Evidence Line",
+          "type": "integer"
+        },
+        "inline_quotes_unverified": {
+          "default": 0,
+          "title": "Inline Quotes Unverified",
+          "type": "integer"
+        },
+        "removed_refs": {
+          "default": 0,
+          "title": "Removed Refs",
+          "type": "integer"
+        },
+        "matrix_cells_total": {
+          "default": 0,
+          "title": "Matrix Cells Total",
+          "type": "integer"
+        },
+        "matrix_cells_filled": {
+          "default": 0,
+          "title": "Matrix Cells Filled",
+          "type": "integer"
+        },
+        "rounds": {
+          "default": 0,
+          "title": "Rounds",
+          "type": "integer"
+        },
+        "uncovered_requirements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Uncovered Requirements",
+          "type": "array"
+        },
+        "reviews_failed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reviews Failed",
+          "type": "array"
+        },
+        "extracted_first_pass": {
+          "default": 0,
+          "title": "Extracted First Pass",
+          "type": "integer"
+        },
+        "extracted_by_coverage": {
+          "default": 0,
+          "title": "Extracted By Coverage",
+          "type": "integer"
+        },
+        "context_window": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Window"
+        },
+        "context_peak_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Peak Pct"
+        },
+        "doc_parts": {
+          "default": 1,
+          "title": "Doc Parts",
+          "type": "integer"
+        },
+        "prompt_versions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Prompt Versions",
+          "type": "object"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "title": "QualityStats",
+      "type": "object"
+    },
     "QuestionPriority": {
       "enum": [
         "blocker",
@@ -337,6 +688,32 @@
       ],
       "title": "QuestionPriority",
       "type": "string"
+    },
+    "QuestionResolution": {
+      "description": "Что меняет ответ автора: новые редакции требований и снятые дефекты.",
+      "properties": {
+        "rewrites": {
+          "items": {
+            "$ref": "#/$defs/RequirementRewrite"
+          },
+          "title": "Rewrites",
+          "type": "array"
+        },
+        "closes_findings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Closes Findings",
+          "type": "array"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "title": "QuestionResolution",
+      "type": "object"
     },
     "Requirement": {
       "properties": {
@@ -427,6 +804,24 @@
       "title": "RequirementKind",
       "type": "string"
     },
+    "RequirementRewrite": {
+      "properties": {
+        "requirement_id": {
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "new_text": {
+          "title": "New Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "new_text"
+      ],
+      "title": "RequirementRewrite",
+      "type": "object"
+    },
     "RunPassport": {
       "properties": {
         "document_name": {
@@ -499,6 +894,24 @@
       "title": "Severity",
       "type": "string"
     },
+    "SkippedFragment": {
+      "description": "Текст документа, который нарезчик не счёл требованием (контроль покрытия нарезки).",
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/SourceLocation"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "location",
+        "reason"
+      ],
+      "title": "SkippedFragment",
+      "type": "object"
+    },
     "SourceLocation": {
       "description": "Ссылка на конкретное место документа. Каждое нарушение обязано иметь хотя бы одну.",
       "properties": {
@@ -555,6 +968,32 @@
           "description": "Цитата найдена в тексте документа кодом (защита от галлюцинаций)",
           "title": "Verified",
           "type": "boolean"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Первая строка (абзац) документа, с 1",
+          "title": "Line Start"
+        },
+        "line_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Последняя строка (абзац) документа",
+          "title": "Line End"
         }
       },
       "required": [
@@ -649,7 +1088,7 @@
   },
   "properties": {
     "schema_version": {
-      "default": "1.1",
+      "default": "1.2",
       "title": "Schema Version",
       "type": "string"
     },
@@ -705,6 +1144,37 @@
     },
     "usage": {
       "$ref": "#/$defs/Usage"
+    },
+    "document_title": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Название документа (из первого заголовка)",
+      "title": "Document Title"
+    },
+    "skipped": {
+      "items": {
+        "$ref": "#/$defs/SkippedFragment"
+      },
+      "title": "Skipped",
+      "type": "array"
+    },
+    "quality": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QualityStats"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

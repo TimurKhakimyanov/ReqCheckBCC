@@ -103,41 +103,37 @@ answer_question(report: Report, history: list[ChatMessage], question: str, llm: 
                 knowledge_snippets: list[str] | None = None) -> Iterator[str]   # поток токенов чата по отчёту
 ```
 
-**Конвейер** (`req_core/pipeline.py`, класс `Pipeline`, метод `run()`):
-1. Чтение (`parsing.py`) → нормализованный `ParsedDocument.text`; все смещения отчёта — от него.
-2. Нарезка (`segment`): LLM (`SegmentationResult`) + детерминированные подсказки `rules.segment_hints`;
-   составные требования делятся на подтребования.
-3. Правила без LLM (`rules.rule_findings`): размытые слова RU/EN, «TBD / заполняются позже», пустые поля шаблона,
-   версия документа.
-4. Проверка требований пакетами по 10 критериям (`check_requirements`, схема `RequirementBatchResult`).
-5. Проверка набора (`check_set`): шесть рецензентов с разными ролями (`prompts.REVIEW_ROLES`, схема
-   `RoleReviewResult`) — контролёр логики правил, контролёр согласованности спецификаций, системный аналитик,
-   тест-аналитик, архитектор интеграций, аналитик рисков и ИБ; каждый отвечает за свои критерии набора, сначала пишет
-   рабочие заметки (`analysis`), может предложить вопрос автору. Параллельно по `concurrency`; здесь применяется
-   `extra_body_set_review`.
-6. Проверка цитат кодом (`resolve_quotes`, `text.QuoteLocator`): цитата ищется в тексте (нормализация, нечёткий
-   поиск); не найдена — дефект привязывается к месту требования с пометкой, а без требования отбрасывается.
-7. Дедупликация кодом; при `verify_pass` (по умолчанию) — верификатор (`verify`, `VerifierResult`): пытается
-   опровергнуть каждый дефект, выравнивает критичность (дефекты правил не отклоняет), затем слияние дублей в два
-   прохода (`llm_dedup`, `DedupResult`): по всему списку и по замечаниям об одном месте; код сливает только
-   связанные замечания (одно место, общее требование или один критерий набора).
-8. Нумерация `D-xxx`, чек-лист, уточняющие вопросы (`clarifying_questions`, `QuestionsResult`; без ответа модели —
-   вопросы рецензентов), сводка, итог.
+**Конвейер** — агенты bbc-agent в `req_core/agent` (вход — `req_core/pipeline.py: run_pipeline`, прогон —
+`agent/run.py: Run`):
+1. Чтение (`parsing.py`) → `ParsedDocument.text`; `agent/ingest.py: from_parsed` режет текст на строки `L<n>|`
+   с разделами и смещениями — модель ссылается на строки, отчёт получает строки и точные символы.
+2. Правила (`agent/rules.py: run_rules` + проверки ReqCheck `rules.rule_findings`) — подсказки (`hint`) в граф.
+3. Нарезчик (`agent/agents/extractor.py`): модель по частям документа, затем контроль покрытия
+   (`extractor_gaps.md`); кандидаты правил ReqCheck (`rules.segment_hints`), не взятые и не объяснённые моделью,
+   добавляются.
+4. Планировщик (`agents/planner.py`): интенты «инспекция пачки требований» и «ревью набора ролью» в общем пуле
+   (`concurrency`); раунды до заполнения матрицы «требование × критерий» (до 4, пачки вдвое меньше). Инспектор —
+   `agents/inspector.py` (`inspector.md`), рецензенты — `agents/reviewers.py` (`reviewer.md`, роли в `PERSPECTIVES`;
+   для них применяется `extra_body_set_review`, только в их потоке).
+5. Запись замечания (`agents/common.py: record_finding`) — контроль достоверности (`agent/guard.py`): без найденной
+   цитаты не принимается, выдуманные цитаты в объяснении и ссылки на несуществующие объекты отмечаются/вычищаются.
+6. Верификатор (`agents/verifier.py`, `verifier.md`, `dedup.md`): перепроверка, слияние дублей, финальные `D-xxx`.
+7. Вопросы автору (`agents/clarifier.py`, `clarifier.md`), чек-лист (`agents/finalizer.py: checklist`), редакции
+   по ответам (`resolver.md`, при `ValidationOptions.answers`), итог (`finalizer.verdict`, `verdict.md`).
+8. Сборка `Report` из графа (`Run._report`), предохранители итога, удаление иероглифов.
 
-**Куда встраивать новую проверку / своего агента-проверяльщика:**
-- Детерминированная проверка — дописать в `rules.rule_findings`, вернуть `FindingDraft` с `spans`
-  (смещения в тексте) и `source=FindingSource.RULE`.
-- LLM-проверка — Pydantic-схема ответа в `schemas.py` (по образцу `Issue`: `criterion`, `severity`, `title`,
-  `explanation`, `quotes`, `suggestion`), промпт в `prompts.py`, метод в `Pipeline`, который вызывает
-  `self.ask(user, Schema, "что делаем")` и превращает ответ через `issues_to_drafts`. Вставлять в `run()` между
-  `check_set` и `resolve_quotes`, чтобы цитаты прошли проверку кодом.
-- Свой LLM-клиент — любой объект с протоколом `LLMClient` можно передать в `req_core.pipeline.run_pipeline(doc,
-  client, options=..., on_progress=...)` (так работает `FakeLLM`). `run_pipeline` — не публичный интерфейс,
-  а внутренний; для внешних потребителей стабилен только `__init__.py`.
+**Куда встраивать новую проверку / своего агента:**
+- Детерминированная проверка — `agent/rules.py: run_rules` (подсказка `Hint` по номеру строки).
+- Агент — промт `agent/prompts/<имя>.md` (`# SYSTEM` / `# USER`, переменные `{{…}}`, `version:`), модуль в
+  `agent/agents/`, вызов `ctx.llm.json(роль, system, user, label=…, prompt="<имя>")`, замечания — через
+  `record_finding` (так они пройдут контроль достоверности и верификатор). Шаг — в `Run._run`.
+- Свой LLM-клиент — объект с `complete_reply(system, user, max_tokens, name=…) -> Reply` (иначе `complete`);
+  `run_pipeline(doc, client, options=..., on_progress=...)` — внутренний интерфейс, стабилен только `__init__.py`.
 
 **Правила ядра:**
-- Ответ модели — только структурированный, через Pydantic-схему (нативная JSON Schema провайдера → инструмент →
-  схема в промпте с валидацией), temperature 0, повторы при ошибке JSON и 429.
+- Ответ модели агентам — JSON по схеме из промта (разбор, спасение оборванного ответа, повтор с пояснением);
+  размер запроса проверяется до вызова по окну модели (`ProviderConfig.context_tokens`). temperature 0, повторы
+  при 429/5xx.
 - Каждая цитата модели проверяется кодом (`SourceLocation.verified`); дословные цитаты — обязательны.
 - Прогресс — только через `on_progress`. Исключение из `on_progress` не глотается и прерывает прогон
   (так воркер реализует отмену и таймаут), в том числе во время паузы перед повтором при 429.
@@ -224,9 +220,11 @@ docker compose -p reqcheck-core --profile cli run --rm --build -e GEMINI_API_KEY
   `docker compose -p <имя> --profile test run --rm --build test-<сервис>`, где сервис — `contracts`, `core`,
   `api`, `worker`, `embedder`, `web`, `infra`. Свой `-p <имя>`, чтобы не задеть чужие контейнеры на хосте.
 - Тесты не ходят в сеть и во внешние LLM. Фейковый провайдер: `from req_core.testing import FakeLLM`.
-  По умолчанию отдаёт пустые ответы по схемам — работают только правила; сценарий задаётся словарём
-  `FakeLLM({"SegmentationResult": {...}, "RequirementBatchResult": {...}})` (значение — dict, модель, JSON
-  или функция `(system, user)`). `FakeLLM.calls` хранит все запросы. Пример: `run_pipeline(parse_document(p), FakeLLM())`.
+  Агентам по умолчанию отвечает «{}» — работают только кандидаты правил в нарезке; сценарий задаётся словарём по
+  имени промта: `FakeLLM({"extractor": ..., "inspector": ..., "reviewer": ..., "verifier": ..., "dedup": ...,
+  "clarifier": ..., "checklist": ..., "verdict": ..., "resolver": ...})` (значение — dict, JSON или функция
+  `(system, user)`). `FakeLLM.calls` хранит все запросы (`prompt` — имя промта). Пример сценария —
+  `packages/core/tests/test_pipeline.py`.
 - Живой прогон — отдельная команда CLI (раздел 5), требует ключа или локального `base_url`.
 - Замер полноты по эталону: `python eval/recall.py report.json eval/requirements_md_reference.json` в каталоге
   `packages/core` (23 эталонных дефекта для `samples/requirements.md`; в промптах эталон не используется).

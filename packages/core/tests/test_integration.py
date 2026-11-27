@@ -37,10 +37,11 @@ def test_validate_document_reports_every_requirement(sample_path, monkeypatch):
     report = validate_document(sample_path, ProviderConfig(provider=ProviderName.GEMINI, model="m"),
                                on_progress=events.append, document_name="ТЗ.md")
     assert report.passport.document_name == "ТЗ.md"
-    top = [r for r in report.requirements if not r.parent_id]
-    done = sorted({e.current for e in events if e.stage == RunStage.CHECKING_REQUIREMENTS and e.current})
-    assert done == list(range(1, len(top) + 1))
-    assert all(e.total == len(top) for e in events if e.stage == RunStage.CHECKING_REQUIREMENTS)
+    assert {a.requirement_id for a in report.requirement_assessments} == {r.id for r in report.requirements}
+    work = [e for e in events if e.stage in (RunStage.CHECKING_REQUIREMENTS, RunStage.CHECKING_SET) and e.current]
+    assert work and all(1 <= e.current <= e.total for e in work)  # ход работы воркеров: интент k из n
+    assert any(e.stage == RunStage.CHECKING_SET for e in work)
+    assert [e.progress for e in events] == sorted(e.progress for e in events)
     assert events[0].stage == RunStage.PARSING and events[-1].stage == RunStage.DONE
     for fmt in ("md", "docx", "pdf"):
         assert render_report(report, fmt)
@@ -53,9 +54,9 @@ def test_exception_from_on_progress_aborts_pipeline(sample_path, monkeypatch):
     with pytest.raises(RunCancelled):
         validate_document(sample_path, ProviderConfig(provider=ProviderName.GEMINI, model="m"),
                           on_progress=_cancel_after(RunStage.CHECKING_REQUIREMENTS, 2, events))
-    schemas = [c["schema"] for c in llm.calls if c["kind"] == "json"]
-    assert "RoleReviewResult" not in schemas  # после отмены модель больше не вызывается
-    assert events[-1].stage == RunStage.CHECKING_REQUIREMENTS
+    prompts = [c.get("prompt") for c in llm.calls]
+    assert not {"verifier", "clarifier", "verdict"} & set(prompts)  # после отмены модель больше не вызывается
+    assert events[-1].stage in (RunStage.CHECKING_REQUIREMENTS, RunStage.CHECKING_SET)
 
 
 def test_cancel_with_parallel_batches(sample_path):

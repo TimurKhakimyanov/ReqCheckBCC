@@ -58,7 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verify", action="store_true", help=argparse.SUPPRESS)  # совместимость: верификатор и так включён
     p.add_argument("--no-questions", action="store_true", help="без уточняющих вопросов автору документа")
     p.add_argument("--max-questions", type=int, default=None, help="не больше стольких вопросов (по умолчанию 15)")
-    p.add_argument("--no-split", action="store_true", help="не выделять атомарные подтребования составных")
+    p.add_argument("--no-split", action="store_true", help=argparse.SUPPRESS)  # совместимость: составные не делятся
+    p.add_argument("--answers", type=Path, default=None,
+                   help="ответы автора на уточняющие вопросы: JSON {\"Q-01\": \"ответ\"} или файл <отчёт>.questions.json "
+                        "с заполненным полем answer — агент предложит новые редакции требований")
+    p.add_argument("--context-tokens", type=int, default=None,
+                   help="окно модели в токенах (по умолчанию — оценка по провайдеру; для vLLM укажите max_model_len)")
     p.add_argument("--no-checklist", action="store_true", help="не заполнять чек-лист «Ревью требований»")
     p.add_argument("--api-key", default=None, help="ключ провайдера (иначе — переменная окружения провайдера)")
     p.add_argument("--base-url", default=None, help="адрес API: обязателен для openai_compatible (vLLM, Ollama: …/v1)")
@@ -76,6 +81,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--name", default=None, help="название документа в отчёте (по умолчанию имя файла)")
     p.add_argument("-q", "--quiet", action="store_true", help="без прогресса в stderr")
     return p
+
+
+def load_answers(path: Path) -> dict[str, str]:
+    """Ответы автора: {"Q-01": "ответ"} или [{"id": "Q-01", "answer": "…"}] (файл <отчёт>.questions.json)."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    rows = raw.items() if isinstance(raw, dict) else [(r.get("id"), r) for r in raw if isinstance(r, dict)]
+    out: dict[str, str] = {}
+    for key, val in rows:
+        ans = val.get("answer") if isinstance(val, dict) else val
+        if key and isinstance(ans, str) and ans.strip():
+            out[str(key).strip()] = ans.strip()
+    return out
 
 
 def _provider_config(args: argparse.Namespace) -> ProviderConfig | None:
@@ -99,6 +116,7 @@ def _provider_config(args: argparse.Namespace) -> ProviderConfig | None:
         "max_output_tokens": args.max_output_tokens, "timeout_s": args.timeout,
         "min_interval_s": args.min_interval, "max_attempts": args.max_attempts,
         "extra_body": args.extra_body, "extra_body_set_review": args.extra_body_set_review,
+        "context_tokens": args.context_tokens,
     }.items() if v is not None}
     return ProviderConfig(provider=provider, model=model or "", base_url=base_url or None,
                           api_key=SecretStr(key) if key else None, **extra)
@@ -131,6 +149,12 @@ def main(argv: list[str] | None = None) -> int:
 
     opt_extra = {k: v for k, v in {"batch_size": args.batch_size, "concurrency": args.concurrency,
                                    "max_questions": args.max_questions}.items() if v is not None}
+    if args.answers is not None:
+        try:
+            opt_extra["answers"] = load_answers(args.answers)
+        except (OSError, ValueError) as e:
+            print(f"Не удалось прочитать ответы {args.answers}: {e}", file=sys.stderr)
+            return 2
     options = ValidationOptions(verify_pass=not args.no_verify, split_compound=not args.no_split,
                                 fill_checklist=not args.no_checklist, ask_questions=not args.no_questions,
                                 **opt_extra)
@@ -171,6 +195,13 @@ def main(argv: list[str] | None = None) -> int:
         path = args.output.with_suffix("." + f)
         path.write_bytes(render_report(report, f))
         written.append(path)
+    if report.questions:  # вопросы автору — сюда вписываются ответы для повторного прогона с --answers
+        qpath = args.output.with_suffix(".questions.json")
+        qpath.write_text(json.dumps(
+            [{"id": q.id, "priority": q.priority.value, "addressee": q.addressee, "question": q.question,
+              "options": q.options, "answer": q.answer or ""} for q in report.questions],
+            ensure_ascii=False, indent=1), encoding="utf-8")
+        written.append(qpath)
     s = report.summary
     if not args.quiet:
         print(f"Требований: {s.requirements_total}; дефектов: {s.findings_total} "
