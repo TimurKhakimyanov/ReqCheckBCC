@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { Toaster } from 'sonner'
 import { onUnauthorized } from '@/api/client'
 import { AppShell } from '@/components/layout/AppShell'
+import { AgentsPage } from '@/features/agents/AgentsPage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { DocumentPage } from '@/features/documents/DocumentPage'
@@ -47,6 +48,7 @@ export function AppRoutes() {
         <Route path="documents/:id" element={<DocumentPage />} />
         <Route path="runs/:id" element={<RunPage />} />
         <Route path="search" element={<SearchPage />} />
+        <Route path="agents" element={<AgentsPage />} />
         <Route path="knowledge" element={<KnowledgePage />} />
         <Route path="usage" element={<UsagePage />} />
         <Route path="audit" element={<AuditPage />} />
