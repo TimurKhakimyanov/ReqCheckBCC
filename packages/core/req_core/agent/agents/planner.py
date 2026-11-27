@@ -11,18 +11,26 @@
 
 Интент, запрос которого не поместился в окно модели (ContextOverflow) или ответ которого был
 оборван, не теряется: его требования уходят в следующий раунд пачками вдвое меньше.
+
+Исключение — отказ модели (LLMRefusal, у Anthropic stop_reason=refusal) на ревью набора: тот же промпт
+даст тот же отказ, поэтому такой интент в следующих раундах не повторяется, а в покрытии и в
+предупреждениях отчёта отмечается, что проверка набора этой ролью не выполнена.
 """
 from __future__ import annotations
 
 import contextvars
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from ...llm import LLMRefusal
 from ..criteria import I_CODES
 from ..graph import Node
 from . import inspector, reviewers
 from .common import Ctx
 
 MAX_ROUNDS = 4
+
+log = logging.getLogger("req_core.agent")
 
 
 def _uncovered_reqs(ctx: Ctx) -> list[str]:
@@ -36,11 +44,20 @@ def _pending_reviews(ctx: Ctx) -> list[tuple[str, int]]:
     return [(p["key"], k) for p in reviewers.PERSPECTIVES for k in parts if (p["key"], k) not in done]
 
 
+def _refused_reviews(ctx: Ctx) -> set[tuple[str, int]]:
+    """Ревью набора, на которые модель ответила отказом: повторять их бесполезно."""
+    return {(i.payload["perspective"], i.payload["part"]) for i in ctx.graph.of("intent")
+            if i.payload["task"] == "review" and i.payload.get("refused")}
+
+
 def _plan(ctx: Ctx, round_no: int) -> list[Node]:
     intents: list[Node] = []
     n_parts = len(reviewers.doc_parts(ctx))
+    refused = _refused_reviews(ctx)
     # Ревью набора ставим в очередь первым: это самые долгие задания, они должны идти параллельно с инспекцией.
     for key, part in _pending_reviews(ctx):
+        if (key, part) in refused:
+            continue
         title = f"Ревью набора: {reviewers.BY_KEY[key]['title']}" + (f" (часть {part + 1}/{n_parts})" if n_parts > 1 else "")
         intents.append(ctx.graph.add(
             "intent", ctx.graph.new_id("INT"), "open",
@@ -68,6 +85,15 @@ def _work(ctx: Ctx, intent: Node) -> None:
         else:
             reviewers.review(ctx, intent.id, intent.payload["perspective"], intent.payload["part"])
         intent.state = "done"
+    except LLMRefusal as e:
+        intent.state = "failed"
+        intent.payload["error"] = f"{type(e).__name__}: {e}"[:300]
+        if intent.payload["task"] == "review":  # инспекция повторится меньшей пачкой — там другой текст запроса
+            intent.payload["refused"] = True
+            ctx.graph.log({"kind": "review_refused", "intent": intent.id, "perspective": intent.payload["perspective"],
+                           "part": intent.payload["part"], "title": intent.payload["title"]})
+            log.warning("%s: модель отказалась отвечать — проверка набора этой ролью не выполнена, повтора не будет",
+                        intent.payload["title"])
     except Exception as e:  # воркер не должен ронять весь прогон: интент вернётся в следующий раунд
         intent.state = "failed"
         intent.payload["error"] = f"{type(e).__name__}: {e}"[:300]
@@ -111,6 +137,8 @@ def run(ctx: Ctx) -> None:
         "uncovered_reqs": _uncovered_reqs(ctx),
         "reviews_total": len(reviewers.PERSPECTIVES) * len(reviewers.doc_parts(ctx)),
         "reviews_failed": sorted({k for k, _ in pending}),
+        # (роль, часть) ревью набора, на которые модель ответила отказом; входят и в reviews_failed
+        "reviews_refused": sorted(_refused_reviews(ctx) & set(pending)),
         "intents": len(ctx.graph.of("intent")),
         "intents_failed": len(ctx.graph.of("intent", "failed")),
     }

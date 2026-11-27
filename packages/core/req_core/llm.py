@@ -66,6 +66,11 @@ class LLMConfigError(LLMError):
     pass
 
 
+class LLMRefusal(LLMError):
+    """Модель отказалась отвечать на запрос (Anthropic stop_reason=refusal). Повтор того же запроса бесполезен:
+    отказ детерминирован содержимым промпта, поэтому его не повторяют ни здесь, ни в планировщике агентов."""
+
+
 @dataclass
 class Reply:
     text: str
@@ -758,7 +763,7 @@ class AnthropicLLM(BaseLLM):
         self.add_usage(getattr(u, "input_tokens", 0), getattr(u, "output_tokens", 0))
         stop = getattr(resp, "stop_reason", None)
         if stop == "refusal":
-            raise LLMError("Anthropic: модель отказалась отвечать (stop_reason=refusal)")
+            raise LLMRefusal("Anthropic: модель отказалась отвечать (stop_reason=refusal)")
         truncated = stop == "max_tokens"
         for block in resp.content:
             if getattr(block, "type", "") == "tool_use" and getattr(block, "name", "") == TOOL_NAME:
