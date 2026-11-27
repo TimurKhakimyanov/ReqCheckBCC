@@ -191,7 +191,25 @@ export const handlers = [
       await delay(import.meta.env.MODE === 'test' ? 0 : 600)
       const key = body.api_key || p._key || (p.has_key ? 'saved-key-a1b2' : undefined)
       const res = probeProvider(p.provider, key, body.base_url ?? p.base_url)
-      return HttpResponse.json({ ok: res.ok, latency_ms: res.ok ? 412 : 35, error: res.error ?? null, models: res.models })
+      // как бэкенд: короткий запрос к модели по умолчанию; модели нет у провайдера — 404, но список всё равно отдаём
+      const valid = res.ok && p.default_model ? res.models.includes(p.default_model) : null
+      if (valid === false)
+        return HttpResponse.json({
+          ok: false,
+          latency_ms: 180,
+          error: `NotFoundError: Error code: 404 - {'type': 'error', 'error': {'type': 'not_found_error', 'message': 'model: ${p.default_model}'}}`,
+          models: res.models,
+          default_model_valid: false,
+          warning: `Модель по умолчанию «${p.default_model}» не найдена у провайдера`,
+        })
+      return HttpResponse.json({
+        ok: res.ok,
+        latency_ms: res.ok ? 412 : 35,
+        error: res.error ?? null,
+        models: res.models,
+        default_model_valid: valid,
+        warning: null,
+      })
     }),
   ),
   http.get(
@@ -201,7 +219,11 @@ export const handlers = [
       if (!p) return err(404, 'Unknown provider', 'not_found')
       // как бэкенд: всегда 200; без доступа к провайдеру — список-подсказка и текст ошибки
       const res = probeProvider(p.provider, p._key || (p.has_key ? 'saved-key-a1b2' : undefined), p.base_url)
-      if (res.ok) return HttpResponse.json({ models: res.models })
+      if (res.ok)
+        return HttpResponse.json({
+          models: res.models,
+          default_model_valid: p.default_model ? res.models.includes(p.default_model) : null,
+        })
       return HttpResponse.json({ models: MODELS[p.provider], error: res.error })
     }),
   ),

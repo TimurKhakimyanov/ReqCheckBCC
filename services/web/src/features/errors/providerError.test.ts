@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { RAW_400, RAW_401 } from '@/mocks/data'
-import { describeProviderError, extractProviderMessage } from './providerError'
+import { describeProviderError, extractModelName, extractProviderMessage } from './providerError'
 
 describe('describeProviderError', () => {
   it('classifies the raw SDK errors users currently see', () => {
@@ -30,5 +30,12 @@ describe('describeProviderError', () => {
     expect(extractProviderMessage(`{"error": {"message": "Bad \\"thing\\"", "code": 1}}`)).toBe('Bad "thing"')
     expect(extractProviderMessage(`{'error': {'message': 'It\\'s wrong'}}`)).toBe("It's wrong")
     expect(extractProviderMessage('no message here')).toBeUndefined()
+  })
+
+  it('extracts the missing model name from 404 texts of different SDKs', () => {
+    expect(extractModelName("NotFoundError: Error code: 404 - {'error': {'type': 'not_found_error', 'message': 'model: claude-opus-4-1'}}")).toBe('claude-opus-4-1')
+    expect(extractModelName("Error code: 404 - {'error': {'message': 'The model `gpt-9` does not exist'}}")).toBe('gpt-9')
+    expect(extractModelName('404 NOT_FOUND. models/gemini-9-pro is not found for API version v1beta')).toBe('gemini-9-pro')
+    expect(extractModelName('Connection refused')).toBeUndefined()
   })
 })

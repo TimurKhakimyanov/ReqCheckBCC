@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, KeyRound, PlugZap, Save, Server } from 'lucide-react'
+import { CheckCircle2, CircleDot, KeyRound, PlugZap, Save, Server, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox, Input, Label } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/misc'
+import { ModelCombobox } from '@/components/ModelCombobox'
 import { ProviderErrorNote } from '@/features/errors/ProviderErrorNote'
 import { useModels } from '@/features/runs/LaunchRunDialog'
 import { formatDate } from '@/shared/format'
@@ -89,13 +90,20 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
     advInvalid ? {} : { extra_body: advanced.update.extra_body, timeout_s: advanced.update.timeout_s },
   )
 
-  // живой список из проверки важнее сохранённого
-  const live = probe.result?.ok ? (probe.result.models ?? []) : []
+  // живой список из проверки важнее сохранённого; берём его и при ok: false (ключ рабочий, а модель — нет)
+  const live = probe.result?.models ?? []
   const options = live.length ? live : (saved.data?.models ?? [])
+  const listIsReal = live.length > 0 || (!!saved.data?.models.length && !saved.data.error)
+  // модель не подменяем молча: пустую — заполняем первой из списка, отсутствующую — подсвечиваем
   useEffect(() => {
-    if (live.length && !live.includes(model)) setModel(live[0])
+    if (!model.trim() && live.length) setModel(live[0])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [probe.result])
+  const backendValid = probe.result ? probe.result.default_model_valid : saved.data?.default_model_valid
+  const modelChanged = model.trim() !== (p.default_model ?? '')
+  const modelMissing =
+    !!model.trim() && ((listIsReal && !options.includes(model.trim())) || (!modelChanged && backendValid === false))
+  const warning = probe.result?.warning ?? saved.data?.warning ?? null
 
   const save = useMutation({
     mutationFn: (body: Parameters<typeof api.updateProvider>[1]) => api.updateProvider(p.provider, body),
@@ -121,6 +129,8 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
   }
 
   const configured = isProviderConfigured(p)
+  const keyTyped = apiKey.trim() !== ''
+  const urlTyped = compat && baseUrl.trim() !== (p.base_url ?? '')
   const keyField = (
     <div className="grid gap-1.5">
       <Label htmlFor={`key-${p.provider}`}>{compat ? t('settings.apiKeyOptional') : t('settings.apiKey')}</Label>
@@ -140,13 +150,20 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle>{t(`provider.${p.provider}`)}</CardTitle>
-          {configured ? (
-            <Badge variant="success">
+          {keyTyped || urlTyped ? (
+            <Badge variant="warning" data-testid="key-state">
+              <CircleDot />
+              {keyTyped ? t('settings.keyUnsaved') : t('settings.urlUnsaved')}
+            </Badge>
+          ) : configured ? (
+            <Badge variant="success" data-testid="key-state">
               {compat ? <Server /> : <KeyRound />}
-              {compat ? t('settings.configured') : p.key_hint}
+              {compat ? t('settings.configured') : t('settings.keySet', { hint: p.key_hint ?? '' })}
             </Badge>
           ) : (
-            <Badge variant="secondary">{compat ? t('settings.notConfigured') : t('settings.noKey')}</Badge>
+            <Badge variant="secondary" data-testid="key-state">
+              {compat ? t('settings.notConfigured') : t('settings.noKey')}
+            </Badge>
           )}
         </div>
         <CardDescription>{t(`settings.providerHint.${p.provider}`)}</CardDescription>
@@ -173,20 +190,29 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
           {keyField}
           <div className="grid gap-1.5">
             <Label htmlFor={`model-${p.provider}`}>{t('settings.defaultModel')}</Label>
-            <Input
+            <ModelCombobox
               id={`model-${p.provider}`}
-              list={`models-${p.provider}`}
               value={model}
-              placeholder={probe.pending ? t('common.loading') : t('settings.modelPlaceholder')}
-              onChange={(e) => setModel(e.target.value)}
-              autoComplete="off"
+              onChange={setModel}
+              options={options}
+              loading={probe.pending || saved.isFetching}
+              invalid={modelMissing}
+              placeholder={t('settings.modelPlaceholder')}
+              aria-describedby={`model-${p.provider}-state`}
             />
-            <datalist id={`models-${p.provider}`} data-testid={`models-${p.provider}`}>
-              {options.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {modelMissing && (
+              <span role="alert" className="flex items-start gap-1.5 text-xs text-destructive">
+                <TriangleAlert className="mt-px size-3.5 shrink-0" />
+                {t('settings.modelUnavailable', { model: model.trim() })}
+              </span>
+            )}
+            {warning && !modelMissing && (
+              <span className="flex items-start gap-1.5 text-xs text-warning">
+                <TriangleAlert className="mt-px size-3.5 shrink-0" />
+                {warning}
+              </span>
+            )}
+            <span id={`model-${p.provider}-state`} className="flex items-center gap-1.5 text-xs text-muted-foreground">
               {probe.pending ? (
                 <>
                   <Spinner className="size-3" /> {t('settings.probing')}
@@ -215,7 +241,7 @@ export function ProviderCard({ p }: { p: ProviderSettings }) {
                 {t('settings.testOk', { ms: probe.result.latency_ms })}
               </div>
             ) : (
-              <ProviderErrorNote raw={probe.result.error ?? ''} />
+              <ProviderErrorNote raw={probe.result.error ?? ''} model={model.trim() || undefined} />
             ))}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground">

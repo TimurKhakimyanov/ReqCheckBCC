@@ -146,7 +146,7 @@ function seed(): Db {
     providers: {
       gemini: { provider: 'gemini', enabled: true, has_key: true, key_hint: '…a1b2', base_url: null, default_model: 'gemini-2.5-flash', updated_at: ago(300), extra_body: null, extra_body_set_review: null, max_output_tokens: null },
       openai: { provider: 'openai', enabled: true, has_key: false, key_hint: null, base_url: null, default_model: 'gpt-4.1-mini', updated_at: null },
-      anthropic: { provider: 'anthropic', enabled: false, has_key: false, key_hint: null, base_url: null, default_model: 'claude-sonnet-4-5', updated_at: null },
+      anthropic: { provider: 'anthropic', enabled: false, has_key: false, key_hint: null, base_url: null, default_model: 'claude-opus-4-1', updated_at: null },
       openai_compatible: { provider: 'openai_compatible', enabled: true, has_key: false, key_hint: null, base_url: 'http://vllm.example.local:8000/v1', default_model: 'local-model', updated_at: ago(300) },
     },
     documents: [doc],
@@ -312,7 +312,7 @@ export function probeProvider(provider: ProviderId, apiKey: string | undefined, 
 export const MODELS: Record<ProviderId, string[]> = {
   gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite'],
   openai: ['gpt-4.1-mini', 'gpt-4.1', 'o4-mini'],
-  anthropic: ['claude-sonnet-4-5', 'claude-haiku-4-5', 'claude-opus-4-1'],
+  anthropic: ['claude-sonnet-4-5', 'claude-haiku-4-5', 'claude-opus-4-5', 'claude-sonnet-4-0', 'claude-3-7-sonnet-latest'],
   openai_compatible: ['qwen2.5:7b-instruct', 'llama3.1:8b-instruct', 'mistral-nemo:12b'],
 }
 

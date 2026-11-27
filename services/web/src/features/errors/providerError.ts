@@ -69,6 +69,15 @@ export function extractProviderMessage(raw: string): string | undefined {
   return m ? m[1].replace(/\\(["'\\])/g, '$1').trim() : undefined
 }
 
+/** Имя модели из текста 404: «model: x», «The model `x` does not exist», «models/x is not found». */
+export function extractModelName(raw: string): string | undefined {
+  const m =
+    /model[`'"]?\s*[:=]\s*[`'"]?([\w.:/@-]+)/i.exec(raw) ??
+    /model\s+[`'"]([^`'"]+)[`'"]/i.exec(raw) ??
+    /models\/([\w.:@-]+)/i.exec(raw)
+  return m?.[1]
+}
+
 export function describeProviderError(raw: string | null | undefined): ProviderErrorInfo {
   const text = (raw ?? '').trim()
   const statusMatch = /(?:Error code|status(?: code)?|HTTP)\s*[:=]?\s*(\d{3})\b/i.exec(text) ?? /\b([45]\d\d)\b/.exec(text)

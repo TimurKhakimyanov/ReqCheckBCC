@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { cn } from '@/shared/utils'
-import { describeProviderError, type ProviderErrorKind } from './providerError'
+import { describeProviderError, extractModelName, type ProviderErrorKind } from './providerError'
 
 /** Куда вести пользователя для исправления */
 const FIX_IN_SETTINGS: ProviderErrorKind[] = ['auth', 'forbidden', 'not_configured', 'not_found', 'quota', 'connection']
@@ -16,15 +16,31 @@ export function useProviderErrorTitle() {
 }
 
 /** Понятный текст ошибки провайдера + совет + раскрывающиеся подробности с исходным текстом. */
-export function ProviderErrorNote({ raw, className, compact = false }: { raw: string; className?: string; compact?: boolean }) {
+export function ProviderErrorNote({
+  raw,
+  className,
+  compact = false,
+  model,
+}: {
+  raw: string
+  className?: string
+  compact?: boolean
+  /** Модель, к которой обращались: для 404 называем её прямо */
+  model?: string
+}) {
   const { t } = useTranslation()
   const info = describeProviderError(raw)
-  const fixLink = FIX_IN_SETTINGS.includes(info.kind)
+  const missingModel = info.kind === 'not_found' ? (extractModelName(info.raw) ?? model) : undefined
+  const title = missingModel ? t('providerError.modelNotFound.title', { model: missingModel }) : t(`providerError.${info.kind}.title`)
+  const hint = missingModel ? t('providerError.modelNotFound.hint') : t(`providerError.${info.kind}.hint`)
+  const fixLink = missingModel && model
+    ? null
+    : FIX_IN_SETTINGS.includes(info.kind)
     ? '/settings'
     : FIX_IN_PARAMS.includes(info.kind)
       ? '/settings?tab=params'
       : null
-  const showRaw = info.raw && info.raw !== t(`providerError.${info.kind}.title`)
+  const showRaw = info.raw && info.raw !== title
   return (
     <div
       role="alert"
@@ -35,10 +51,10 @@ export function ProviderErrorNote({ raw, className, compact = false }: { raw: st
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
         <div className="grid min-w-0 gap-1">
           <p className="font-medium text-destructive">
-            {t(`providerError.${info.kind}.title`)}
+            {title}
             {info.status ? <span className="ml-1.5 font-normal opacity-70">({info.status})</span> : null}
           </p>
-          {!compact && <p className="text-foreground/80">{t(`providerError.${info.kind}.hint`)}</p>}
+          {!compact && <p className="text-foreground/80">{hint}</p>}
           {info.providerMessage && (
             <p className="text-foreground/80">
               <span className="text-muted-foreground">{t('providerError.providerSays')}: </span>

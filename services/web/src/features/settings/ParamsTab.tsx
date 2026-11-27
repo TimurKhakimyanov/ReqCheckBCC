@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input, Label, NativeSelect } from '@/components/ui/input'
 import { ErrorNote, Skeleton, Spinner } from '@/components/ui/misc'
+import { ModelCombobox } from '@/components/ModelCombobox'
 import { useAppSettings, useModels, useProviders } from '@/features/runs/LaunchRunDialog'
 import { formatDate } from '@/shared/format'
 
@@ -217,19 +218,14 @@ export function ParamsTab() {
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="set-model">{t('params.defaultModel')}</Label>
-            <Input
+            <ModelCombobox
               id="set-model"
-              list="set-model-list"
               value={draft.default_model}
+              onChange={(v) => set('default_model', v)}
+              options={models.data?.models ?? []}
+              loading={models.isFetching}
               placeholder={t('settings.modelPlaceholder')}
-              onChange={(e) => set('default_model', e.target.value)}
-              autoComplete="off"
             />
-            <datalist id="set-model-list">
-              {(models.data?.models ?? []).map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
           </div>
         </div>
       </Section>

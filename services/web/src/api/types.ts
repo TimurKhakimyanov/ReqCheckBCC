@@ -88,8 +88,12 @@ export interface ProviderTestResult {
   ok: boolean
   latency_ms: number
   error?: string | null
-  /** Модели, которые вернул провайдер при проверке (живой список). */
+  /** Модели, которые вернул провайдер при проверке (живой список). Заполняется и при ok: false. */
   models?: string[]
+  /** Есть ли модель по умолчанию в этом списке; null — неизвестно */
+  default_model_valid?: boolean | null
+  /** Предупреждение бэкенда (напр., модель по умолчанию недоступна) */
+  warning?: string | null
 }
 
 /** Проверка ещё не сохранённых значений формы: ключ и/или адрес. Пустое тело — сохранённые настройки. */
@@ -351,6 +355,8 @@ export interface ModelsResponse {
   models: string[]
   /** Провайдер недоступен — models содержит список-подсказку. */
   error?: string | null
+  default_model_valid?: boolean | null
+  warning?: string | null
 }
 
 export type ExportFormat = 'md' | 'pdf' | 'docx' | 'json'
