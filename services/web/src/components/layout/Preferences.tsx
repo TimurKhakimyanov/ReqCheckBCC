@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Languages, Monitor, Moon, Sun } from 'lucide-react'
+import { Languages, Moon, Sun } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import type { User } from '@/api/types'
@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { languages } from '@/i18n'
-import { useTheme, type ThemeMode } from '@/theme/theme'
+import { useTheme } from '@/theme/theme'
 
 /** Смена языка: сразу в интерфейсе и (если вошли) сохраняется в профиле. */
 export function useChangeLanguage() {
@@ -56,30 +56,16 @@ export function LanguageSwitch({ compact = true }: { compact?: boolean }) {
   )
 }
 
+/** Одна кнопка: светлая ⇄ тёмная. Иконка показывает, на какую тему переключит нажатие. */
 export function ThemeToggle() {
   const { t } = useTranslation()
-  const { mode, resolved, setMode } = useTheme()
-  const Icon = mode === 'system' ? Monitor : resolved === 'dark' ? Moon : Sun
+  const { resolved, setMode } = useTheme()
+  const next = resolved === 'dark' ? 'light' : 'dark'
+  const label = next === 'dark' ? t('prefs.toDark') : t('prefs.toLight')
+  const Icon = next === 'dark' ? Moon : Sun
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={t('prefs.theme')}>
-          <Icon />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuRadioGroup value={mode} onValueChange={(v) => setMode(v as ThemeMode)}>
-          <DropdownMenuRadioItem value="light">
-            <Sun /> {t('prefs.light')}
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="dark">
-            <Moon /> {t('prefs.dark')}
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="system">
-            <Monitor /> {t('prefs.system')}
-          </DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Button variant="ghost" size="icon-sm" aria-label={label} title={label} onClick={() => setMode(next)} data-testid="theme-toggle">
+      <Icon key={next} className="rc-spin-in" />
+    </Button>
   )
 }

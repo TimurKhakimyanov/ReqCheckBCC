@@ -355,8 +355,29 @@ class AuditEntry(BaseModel):
     action: str
     target: str | None
     details: dict[str, Any]
+    ip: str | None = None
 
 
 class AuditList(BaseModel):
     items: list[AuditEntry]
     total: int
+    actions: list[str] = Field(default_factory=list, description="Все действия в журнале — для фильтра")
+
+
+class RunLogEntry(BaseModel):
+    id: int
+    ts: datetime
+    level: Literal["debug", "info", "warning", "error", "critical"]
+    source: str = Field(description="progress — событие агента; core/llm — ядро; worker; system; audit — действие пользователя")
+    stage: RunStage | None = None
+    message: str
+    current: int | None = None
+    total: int | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunLogsOut(BaseModel):
+    run: RunOut
+    items: list[RunLogEntry]
+    audit: list[AuditEntry] = Field(default_factory=list, description="Действия пользователей над прогоном")
+    truncated: bool = False

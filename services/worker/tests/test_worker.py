@@ -6,9 +6,12 @@ import os
 
 os.environ["APP_ENV"] = "test"
 
+import contextvars  # noqa: E402
+import logging  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 import uuid  # noqa: E402
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 
 import pytest  # noqa: E402
 import req_core  # noqa: E402
@@ -19,11 +22,12 @@ testing.block_external_network()  # тесты не ходят во внешню
 
 from app.app_settings import AppSettings, load_row  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
-from app.models import Document, ProviderSetting, ReportRow, Run  # noqa: E402
+from app.models import Document, ProviderSetting, ReportRow, Run, RunLog  # noqa: E402
 from app.providers import set_api_key  # noqa: E402
 from app.services import run_cancel_key, run_events_channel, set_services  # noqa: E402
 from app.vectors import REQUIREMENTS  # noqa: E402
 from req_contracts import ProgressEvent, Report, RunStage  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 from worker.celery_app import celery  # noqa: E402
 from worker.tasks import describe_error, run_validation  # noqa: E402
 
@@ -118,6 +122,59 @@ def test_successful_run(svc, monkeypatch):
     kinds = {h.payload["kind"] for h in hits}
     assert kinds == {"requirement", "finding"}
     assert len(hits) == len(SAMPLE.requirements) + len(SAMPLE.findings)
+
+
+def run_logs(run_id: str) -> list[RunLog]:
+    with SessionLocal() as db:
+        return list(db.scalars(select(RunLog).where(RunLog.run_id == uuid.UUID(run_id)).order_by(RunLog.id)))
+
+
+def test_run_log_is_persisted(svc, monkeypatch, caplog):
+    """Журнал прогона: события агентов, логи ядра из его пулов потоков (по контексту) и итог воркера."""
+    core_log = logging.getLogger("req_core.llm")
+    caplog.set_level(logging.INFO)  # в проде уровень задаёт setup_logging (LOG_LEVEL=INFO)
+
+    def validate(path, llm, *, options=None, on_progress=None, document_name=None):
+        on_progress(ProgressEvent(stage=RunStage.PARSING, progress=0.1, message="Разбор документа"))
+        on_progress(ProgressEvent(stage=RunStage.CHECKING_REQUIREMENTS, progress=0.5, message="Проверено R-1",
+                                  current=1, total=2))
+        on_progress(ProgressEvent(stage=RunStage.CHECKING_REQUIREMENTS, progress=0.5, message="Проверено R-1",
+                                  current=1, total=2))  # повтор не пишется
+        ctxs = [contextvars.copy_context() for _ in range(2)]
+        with ThreadPoolExecutor(2) as ex:  # как req_core.pipeline._ctx_map
+            list(ex.map(lambda c, i: c.run(core_log.info, "LLM stub: вызов %d", i, extra={"latency_ms": 5}),
+                        ctxs, range(2)))
+        logging.getLogger("req_core.pipeline").warning("Шаг «нарезка» не выполнен моделью")
+        return SAMPLE
+
+    monkeypatch.setattr(req_core, "validate_document", validate)
+    run_id = make_run(svc)
+    assert run_validation.delay(run_id).get() == "done"
+    rows = run_logs(run_id)
+    msgs = [r.message for r in rows]
+    assert msgs.count("Проверено R-1") == 1
+    llm = [r for r in rows if r.source == "llm"]
+    assert len(llm) == 2 and all(r.stage == "checking_requirements" and r.data["latency_ms"] == 5 for r in llm)
+    warn = next(r for r in rows if r.source == "core")
+    assert warn.level == "warning" and warn.data["logger"] == "req_core.pipeline"
+    assert rows[0].source == "worker" and rows[0].stage == "queued" and rows[0].message.startswith("Прогон запущен: gemini/")
+    assert rows[1].source == "progress" and rows[1].stage == "parsing"
+    assert any(m.startswith("Итог: вызовов LLM") for m in msgs)
+    assert rows[-1].stage == "done" and rows[-1].message.startswith("Готово")
+    assert not any(m in ("run started", "run finished") for m in msgs)  # английские info воркера — только в Loki
+
+
+def test_failed_run_log_has_error(svc, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("кончилась память")
+
+    monkeypatch.setattr(req_core, "validate_document", boom)
+    run_id = make_run(svc)
+    assert run_validation.delay(run_id).get() == "failed"
+    errors = [r for r in run_logs(run_id) if r.level == "error"]
+    assert any("кончилась память" in (r.data.get("exc") or "") for r in errors)
+    assert any(r.message == "Прогон завершился ошибкой: RuntimeError: кончилась память" for r in errors)
+    assert errors[-1].stage == "failed"
 
 
 def test_core_stub_gives_clear_error(svc, monkeypatch):

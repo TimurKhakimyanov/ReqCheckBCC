@@ -306,6 +306,64 @@
     stroke-dasharray: 6 8;
     animation: rc-dash 2.4s linear infinite;
   }
+  /* Пустой список провайдеров: робот моргает, вилка тянется к розетке, тень дышит вместе с роботом */
+  .rc-eyes {
+    animation: rc-eyes 4s ease-in-out infinite;
+  }
+  .rc-plug {
+    animation: rc-plug 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  .rc-shadow {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: rc-shadow 3.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  /* Смена темы: иконка въезжает с поворотом */
+  .rc-spin-in {
+    animation: rc-spin-in 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+}
+
+@keyframes rc-eyes {
+  0%,
+  44%,
+  50%,
+  100% {
+    transform: scaleY(1);
+  }
+  47% {
+    transform: scaleY(0.1);
+  }
+}
+@keyframes rc-plug {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(5px);
+  }
+}
+@keyframes rc-shadow {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scaleX(0.8);
+    opacity: 0.6;
+  }
+}
+@keyframes rc-spin-in {
+  from {
+    opacity: 0;
+    transform: rotate(-120deg) scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @keyframes rc-bob {
@@ -695,6 +753,10 @@
   .rc-caret,
   .rc-grow,
   .rc-fade,
+  .rc-eyes,
+  .rc-plug,
+  .rc-shadow,
+  .rc-spin-in,
   .rc-breath,
   .rc-spin-dash,
   .rc-drop-cube,

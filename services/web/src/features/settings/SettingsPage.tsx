@@ -9,13 +9,12 @@ import { useChangeLanguage } from '@/components/layout/Preferences'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input, Label, NativeSelect } from '@/components/ui/input'
-import { ErrorNote, PageHeader, Skeleton, Spinner } from '@/components/ui/misc'
+import { ErrorNote, PageHeader, Spinner } from '@/components/ui/misc'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useProviders } from '@/features/runs/LaunchRunDialog'
 import { languages } from '@/i18n'
 import { useTheme, type ThemeMode } from '@/theme/theme'
 import { ParamsTab } from './ParamsTab'
-import { ProviderCard } from './ProviderCard'
+import { ProvidersTab } from './ProvidersTab'
 
 function PasswordCard() {
   const { t } = useTranslation()
@@ -114,7 +113,6 @@ type SettingsTab = (typeof TABS)[number]
 
 export function SettingsPage() {
   const { t } = useTranslation()
-  const providers = useProviders()
   const [params, setParams] = useSearchParams()
   const tab = (TABS.includes(params.get('tab') as SettingsTab) ? params.get('tab') : 'providers') as SettingsTab
   const setTab = (v: string) =>
@@ -139,12 +137,7 @@ export function SettingsPage() {
           ))}
         </TabsList>
         <TabsContent value="providers">
-          {providers.error && <ErrorNote error={providers.error} />}
-          <div className="grid gap-4 md:grid-cols-2">
-            {providers.isPending
-              ? [0, 1].map((i) => <Skeleton key={i} className="h-72" />)
-              : providers.data?.map((p) => <ProviderCard key={`${p.provider}-${p.updated_at}`} p={p} />)}
-          </div>
+          <ProvidersTab />
         </TabsContent>
         <TabsContent value="params">
           <ParamsTab />

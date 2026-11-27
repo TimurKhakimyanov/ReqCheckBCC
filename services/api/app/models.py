@@ -104,6 +104,23 @@ class ReportRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class RunLog(Base):
+    """Журнал прогона: события агентов (этапов), логи ядра и воркера, вызовы LLM. Пишет воркер (worker/runlog.py)."""
+
+    __tablename__ = "run_logs"
+    __table_args__ = (Index("ix_run_logs_run_id_id", "run_id", "id"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    level: Mapped[str] = mapped_column(String(16), default="info")  # debug | info | warning | error
+    source: Mapped[str] = mapped_column(String(16), default="worker")  # progress | core | llm | worker | system
+    stage: Mapped[str | None] = mapped_column(String(32), nullable=True)  # агент (RunStage) на момент записи
+    message: Mapped[str] = mapped_column(Text, default="")
+    current: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    data: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
 class FindingReview(Base):
     __tablename__ = "finding_reviews"
     __table_args__ = (UniqueConstraint("run_id", "finding_id"),)

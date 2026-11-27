@@ -14,7 +14,7 @@ import req_core
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from req_contracts import ProgressEvent, Report, RunStage, ValidationOptions
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import joinedload
 from starlette.concurrency import run_in_threadpool
 
@@ -25,13 +25,24 @@ from ..db import SessionLocal
 from ..deps import DB, CurrentUser, Svc, parse_uuid
 from ..errors import ApiError, not_found
 from ..metrics import RUNS_CREATED, SSE_CONNECTIONS
-from ..models import Document, FindingReview, ReportRow, Run
+from ..models import AuditLog, Document, FindingReview, ReportRow, Run, RunLog
 from ..providers import ProviderNotConfigured, build_provider_config, default_provider
-from ..schemas import ErrorOut, FindingReviewIn, FindingReviewOut, FindingWithReview, RunCreate, RunList, RunOut
+from ..schemas import (
+    ErrorOut,
+    FindingReviewIn,
+    FindingReviewOut,
+    FindingWithReview,
+    RunCreate,
+    RunList,
+    RunLogEntry,
+    RunLogsOut,
+    RunOut,
+)
 from ..serialize import TERMINAL, run_out
 from ..services import run_cancel_key, run_events_channel
 from ..vectors import REQUIREMENTS
 from .documents import content_disposition
+from .system import audit_entry
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 log = logging.getLogger(__name__)
@@ -43,6 +54,8 @@ EXPORT_TYPES = {
     "pdf": "application/pdf",
 }
 KEEPALIVE_S = 15.0
+LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
+STAGES = {s.value for s in RunStage}
 
 
 def get_run(db, run_id: str) -> Run:
@@ -109,6 +122,24 @@ def list_runs(_: CurrentUser, db: DB, document_id: str | None = None, status: Ru
 @router.get("/{run_id}", response_model=RunOut, responses={404: {"model": ErrorOut}})
 def read_run(run_id: str, _: CurrentUser, db: DB) -> RunOut:
     return run_out(get_run(db, run_id))
+
+
+@router.get("/{run_id}/logs", response_model=RunLogsOut, responses={404: {"model": ErrorOut}})
+def run_logs(run_id: str, _: CurrentUser, db: DB, limit: int = Query(5000, ge=1, le=20000)) -> RunLogsOut:
+    """Журнал прогона по порядку записи: события агентов, логи ядра и воркера, вызовы LLM, действия пользователей."""
+    run = get_run(db, run_id)
+    rows = db.scalars(select(RunLog).where(RunLog.run_id == run.id).order_by(RunLog.id).limit(limit + 1)).all()
+    rid = str(run.id)
+    acts = db.scalars(select(AuditLog).where(or_(AuditLog.target == rid, AuditLog.target.like(f"{rid}/%")))
+                      .order_by(AuditLog.id)).all()
+    return RunLogsOut(
+        run=run_out(run),
+        items=[RunLogEntry(id=r.id, ts=r.ts, level=r.level if r.level in LOG_LEVELS else "info",  # type: ignore[arg-type]
+                           source=r.source, stage=RunStage(r.stage) if r.stage in STAGES else None, message=r.message,
+                           current=r.current, total=r.total, data=r.data or {}) for r in rows[:limit]],
+        audit=[audit_entry(a) for a in acts],
+        truncated=len(rows) > limit,
+    )
 
 
 def cancel_run_row(db, svc, run: Run, actor: str, request: Request | None = None) -> None:
