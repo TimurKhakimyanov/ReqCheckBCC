@@ -7,8 +7,11 @@
      модель в два прохода — по всему списку и отдельно по замечаниям об одном месте документа; модель предлагает
      группы, код решает, что объединять и какое замечание оставить. Если модель не ответила, остаётся слияние
      кодом, а в отчёт попадает предупреждение;
-  4) код: серьёзность слитого замечания — медиана оценок верификатора по всем его повторам; пересчёт вердиктов
-     по подтверждённым замечаниям, финальная нумерация D-001…
+  4) калибровка серьёзности: слитое замечание получает медиану оценок по всем его повторам, затем модель
+     один раз смотрит на итоговый список целиком и расставляет уровни относительно друг друга (по пачкам
+     верификатор оценивает каждое замечание отдельно, и почти всё выходит «существенным»); код не даёт опустить
+     противоречие ниже «существенного»;
+  5) код: пересчёт вердиктов по подтверждённым замечаниям, финальная нумерация D-001…
 """
 from __future__ import annotations
 
@@ -195,6 +198,47 @@ def _settle_severity(conf: list[Node]) -> None:
         n.payload["severity"] = next(k for k, v in SEVERITY_ORDER.items() if v == rank)
 
 
+def _calibrate(ctx: Ctx, conf: list[Node]) -> None:
+    """Калибровка серьёзности по итоговому списку. Верификатор оценивает замечания пачками и по отдельности,
+    поэтому почти все выходят «существенными»; здесь модель видит список целиком и сравнивает замечания между
+    собой. Ответ принимается, только если модель оценила большинство замечаний; противоречие не опускается ниже
+    «существенного». Сбой шага ничего не меняет — остаются оценки верификатора."""
+    alive = [n for n in conf if n.state == "confirmed"]
+    if len(alive) < 6:      # на коротком списке сравнивать не с чем
+        return
+    system, user = prompts.load("calibrator").render(title=ctx.doc.title, findings="\n".join(_row(n) for n in alive))
+    if not ctx.budget.fits(system, user):
+        return
+    try:
+        data = ctx.llm.json("verifier", system, user, label="калибровка серьёзности", prompt="calibrator")
+    except Exception as e:
+        ctx.graph.log({"kind": "calibration_failed", "error": f"{type(e).__name__}: {e}"[:300]})
+        return
+    levels = {}
+    for d in lst(data.get("levels") if isinstance(data, dict) else data):
+        if isinstance(d, dict) and s(d.get("severity")).lower() in SEVERITY:
+            levels[s(d.get("id"))] = d
+    by_id = {n.id: n for n in alive}
+    if sum(1 for i in levels if i in by_id) < 0.7 * len(alive):
+        ctx.graph.log({"kind": "calibration_failed", "error": f"оценено {len(levels)} из {len(alive)} замечаний"})
+        return
+    changed = 0
+    for fid, d in levels.items():
+        n = by_id.get(fid)
+        if n is None:
+            continue
+        new, old = s(d.get("severity")).lower(), n.payload["severity"]
+        if n.payload["defect_type"] == "contradictory" and new == "minor":
+            new = "major"
+        if new != old:
+            n.payload["severity"] = new
+            changed += 1
+            ctx.graph.log({"kind": "severity_calibrated", "finding": n.id, "from": old, "to": new,
+                           "title": n.payload["title"], "reason": s(d.get("reason"))[:200]})
+    ctx.meta["calibrated"] = changed
+    ctx.say(f"   калибровка серьёзности: изменено оценок — {changed} из {len(alive)}")
+
+
 def _normalize_criteria(ctx: Ctx, nodes: list[Node]) -> None:
     """Критерий набора по типу дефекта. Рецензент относит замечание к «своему» критерию, из-за чего противоречие
     попадало в «полноту», а пропуск — в «непротиворечивость»."""
@@ -377,6 +421,7 @@ def run(ctx: Ctx, check: bool = True) -> None:
     if check:
         _dedup(ctx, kept)
         _settle_severity(kept)
+        _calibrate(ctx, kept)
         if ctx.meta.get("dedup_failed"):
             ctx.say("   слияние дублей: модель не ответила, слиты только явные повторы (правилом, без модели)")
 

@@ -131,6 +131,39 @@ def _clean(s: str | None) -> str | None:
     return re.sub(r"[ \t]{2,}", " ", FOREIGN_SCRIPT.sub(" ", s)).strip()
 
 
+_NFR = re.compile(r"\bNFRs?\b")
+
+
+def russian_terms(report: Report) -> Report:
+    """«NFR» в тексте модели → «НФТ» (как в русских документах требований), если сам документ так не пишет."""
+    if _NFR.search(report.document.text or ""):
+        return report
+
+    def fix(s: str | None) -> str | None:
+        return _NFR.sub("НФТ", s) if s else s
+
+    for f in report.findings:
+        f.title, f.explanation, f.suggestion, f.verifier_note = map(fix, (f.title, f.explanation, f.suggestion,
+                                                                          f.verifier_note))
+    for a in report.requirement_assessments:
+        for c in a.checks:
+            c.comment = fix(c.comment)
+    for c in report.set_assessment.checks:
+        c.comment = fix(c.comment)
+    for item in report.checklist:
+        item.comment = fix(item.comment)
+    for q in report.questions:
+        q.question, q.why = fix(q.question), fix(q.why)
+        q.options = [fix(o) for o in q.options]
+    c = report.conclusion
+    c.rationale, c.development, c.testing = fix(c.rationale), fix(c.development), fix(c.testing)
+    c.top_fixes = [fix(x) for x in c.top_fixes]
+    c.strengths = [fix(x) for x in c.strengths]
+    for fx in c.fixes:
+        fx.action, fx.why = fix(fx.action), fix(fx.why)
+    return report
+
+
 def strip_foreign_script(report: Report) -> Report:
     """Убирает иероглифы, которые модель вставляет в русский текст (цитаты не трогаем — они из документа)."""
     for f in report.findings:
@@ -308,6 +341,7 @@ class Run:
         report = self._report(t0)
         if not FOREIGN_SCRIPT.search(doc.text):
             report = strip_foreign_script(report)
+        report = russian_terms(report)
         self.progress(RunStage.DONE, 1.0,
                       f"Готово: требований {len(report.requirements)}, дефектов {len(report.findings)}")
         return report

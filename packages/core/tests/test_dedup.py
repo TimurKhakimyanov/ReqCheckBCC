@@ -168,3 +168,50 @@ def test_report_is_compact_and_traceable(sample_path):
     line = tz.locations[0].line_start
     assert any(row.startswith(f"| L{line} |") and "Ф-2" in row for row in md.split("\n"))
     assert "1 замечаний" not in md and "bbc-agent" not in md
+
+
+def calibration_ctx(answer, nodes):
+    log = []
+    ctx = SimpleNamespace(
+        doc=SimpleNamespace(title="Документ"), budget=SimpleNamespace(fits=lambda *a: True),
+        llm=SimpleNamespace(json=lambda *a, **k: answer(nodes) if callable(answer) else answer),
+        graph=SimpleNamespace(log=log.append), meta={}, say=lambda msg: None,
+    )
+    return ctx, log
+
+
+def test_calibration_compares_findings_on_the_whole_list():
+    nodes = [finding(f"C-{i:03d}", f"Замечание {i}", [i]) for i in range(1, 9)]
+    nodes[0].payload["defect_type"] = "contradictory"
+    levels = [{"id": "C-001", "severity": "minor", "reason": "мелочь"},   # противоречие ниже major не опускается
+              {"id": "C-002", "severity": "critical", "reason": "блокирует"},
+              {"id": "C-003", "severity": "minor", "reason": "оформление"},
+              {"id": "C-999", "severity": "minor"},                          # неизвестное замечание игнорируется
+              *[{"id": f"C-{i:03d}", "severity": "major"} for i in range(4, 9)]]
+    ctx, log = calibration_ctx({"levels": levels}, nodes)
+    v._calibrate(ctx, nodes)
+    assert [n.payload["severity"] for n in nodes[:3]] == ["major", "critical", "minor"]
+    assert ctx.meta["calibrated"] == 2
+    assert [r["finding"] for r in log if r["kind"] == "severity_calibrated"] == ["C-002", "C-003"]
+
+
+def test_calibration_is_ignored_when_the_model_rated_too_few_or_failed():
+    nodes = [finding(f"C-{i:03d}", f"Замечание {i}", [i]) for i in range(1, 9)]
+    ctx, log = calibration_ctx({"levels": [{"id": "C-001", "severity": "minor"}]}, nodes)
+    v._calibrate(ctx, nodes)
+    assert all(n.payload["severity"] == "major" for n in nodes) and log[-1]["kind"] == "calibration_failed"
+
+    def boom(_nodes):
+        raise RuntimeError("модель недоступна")
+
+    ctx, log = calibration_ctx(boom, nodes)
+    v._calibrate(ctx, nodes)
+    assert all(n.payload["severity"] == "major" for n in nodes) and log[-1]["kind"] == "calibration_failed"
+
+
+def test_nfr_is_written_in_russian_unless_the_document_uses_it(sample_path):
+    from req_core.agent.run import russian_terms
+
+    report = run_pipeline(parse_document(sample_path), scripted())
+    report.findings[0].title = "NFR «в течение минуты» не имеет измеримого показателя"
+    assert russian_terms(report).findings[0].title.startswith("НФТ «в течение минуты»")
