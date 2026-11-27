@@ -34,10 +34,12 @@ docker compose -p reqcheck-core --profile cli run --rm -e ANTHROPIC_API_KEY=ва
 ```
 
 Локальная модель на vLLM / Ollama (ключ не нужен). Для моделей с рассуждениями рассуждения выключаются на
-проверке требований и включаются на поиске противоречий в наборе (`--extra-body`, `--extra-body-set-review`):
+проверке требований и включаются на поиске противоречий в наборе (`--extra-body`, `--extra-body-set-review`);
+с рассуждениями один запрос проверки набора идёт несколько минут, поэтому `--timeout 900`. На примере из
+`samples/` (42 требования) прогон на `mimo-v2.6-flash` занимает около 8 минут:
 
 ```powershell
-docker compose -p reqcheck-core --profile cli run --rm cli /data/requirements.md /data/report.md --provider openai_compatible --base-url http://vllm.example.local:8000/v1 --model mimo-v2.6-flash --concurrency 4 --max-tokens 48000 --extra-body '{\"chat_template_kwargs\":{\"enable_thinking\":false}}' --extra-body-set-review '{\"chat_template_kwargs\":{\"enable_thinking\":true}}'
+docker compose -p reqcheck-core --profile cli run --rm cli /data/requirements.md /data/report.md --provider openai_compatible --base-url http://vllm.example.local:8000/v1 --model mimo-v2.6-flash --concurrency 4 --max-tokens 48000 --timeout 900 --extra-body '{\"chat_template_kwargs\":{\"enable_thinking\":false}}' --extra-body-set-review '{\"chat_template_kwargs\":{\"enable_thinking\":true}}'
 ```
 
 (`OPENAI_API_KEY` + `--provider openai` — аналогично.)
