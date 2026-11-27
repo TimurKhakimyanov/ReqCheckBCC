@@ -58,6 +58,14 @@ export type Page = number | null;
  * Цитата найдена в тексте документа кодом (защита от галлюцинаций)
  */
 export type Verified = boolean;
+/**
+ * Первая строка (абзац) документа, с 1
+ */
+export type LineStart = number | null;
+/**
+ * Последняя строка (абзац) документа
+ */
+export type LineEnd = number | null;
 export type Requirements = Requirement[];
 export type RequirementId = string;
 export type Criterion =
@@ -82,6 +90,10 @@ export type Criterion =
 export type CheckVerdict = "pass" | "fail" | "not_applicable";
 export type Comment = string | null;
 export type FindingIds = string[];
+/**
+ * Кто оценил критерий набора (рецензенты)
+ */
+export type AssessedBy = string[];
 export type Checks = CriterionCheck[];
 export type RequirementAssessments = RequirementAssessment[];
 export type Checks1 = CriterionCheck[];
@@ -103,9 +115,41 @@ export type Locations = [SourceLocation, ...SourceLocation[]];
  */
 export type Suggestion = string | null;
 export type FindingSource = "llm" | "rule";
+/**
+ * Тип дефекта (методика bbc-agent). Первые три — «критичные» в терминах задания.
+ */
+export type DefectType =
+  | "unverifiable"
+  | "contradictory"
+  | "incomplete"
+  | "ambiguous"
+  | "design"
+  | "not_singular"
+  | "infeasible"
+  | "incorrect"
+  | "nonconforming"
+  | "untraceable"
+  | "redundant"
+  | "risk";
+/**
+ * Насколько цитата замечания совпала с документом (проверено кодом).
+ */
+export type Grounding = "exact" | "fuzzy" | "line";
+/**
+ * Агенты, нашедшие дефект (с учётом слитых дублей): inspector, reviewer:qa…
+ */
+export type FoundBy = string[];
+/**
+ * Обоснование решения верификатора
+ */
+export type VerifierNote = string | null;
+/**
+ * Вопрос Q-xx, ответ на который снимает дефект
+ */
+export type ResolvedBy = string | null;
 export type Findings = Finding[];
 export type Question = string;
-export type ChecklistAnswer = "yes" | "no" | "not_required";
+export type ChecklistAnswer = "yes" | "no" | "partial" | "not_required";
 export type Comment1 = string;
 export type FindingIds1 = string[];
 export type Checklist = ChecklistItem[];
@@ -128,6 +172,16 @@ export type FindingIds2 = string[];
  * 2–4 варианта ответа, между которыми выбирает автор
  */
 export type Options = string[];
+export type RequirementIds1 = string[];
+/**
+ * Ответ автора (если прогон запущен с ответами)
+ */
+export type Answer = string | null;
+export type RequirementId1 = string;
+export type NewText = string;
+export type Rewrites = RequirementRewrite[];
+export type ClosesFindings = string[];
+export type Note = string;
 export type Questions = ClarifyingQuestion[];
 export type RequirementsTotal = number;
 export type FindingsTotal = number;
@@ -139,11 +193,66 @@ export type Rationale = string;
  * Что исправить в первую очередь, по порядку; со ссылками на D-xxx
  */
 export type TopFixes = string[];
+/**
+ * Итоговое решение по документу.
+ */
+export type Decision = "blocked" | "limited" | "ready";
+/**
+ * Что можно брать в разработку сейчас, что заблокировано
+ */
+export type Development = string;
+/**
+ * По каким требованиям можно писать тест-кейсы
+ */
+export type Testing = string;
+export type Action = string;
+export type Why1 = string;
+export type FindingIds3 = string[];
+/**
+ * top_fixes с обоснованием и ссылками
+ */
+export type Fixes = FixItem[];
+/**
+ * Сильные стороны документа
+ */
+export type Strengths = string[];
+/**
+ * Решение ужесточено правилом (например, есть критичные дефекты)
+ */
+export type GuardNote = string;
 export type LlmCalls = number;
 export type PromptTokens = number;
 export type CompletionTokens = number;
 export type CostUsd = number | null;
 export type DurationS = number | null;
+/**
+ * Название документа (из первого заголовка)
+ */
+export type DocumentTitle = string | null;
+export type Reason = string;
+export type Skipped = SkippedFragment[];
+export type Candidates = number;
+export type RejectedByCode = number;
+export type RejectedByVerifier = number;
+export type Merged = number;
+export type Confirmed = number;
+export type Unverified = number;
+export type EvidenceExact = number;
+export type EvidenceFuzzy = number;
+export type EvidenceLine = number;
+export type InlineQuotesUnverified = number;
+export type RemovedRefs = number;
+export type MatrixCellsTotal = number;
+export type MatrixCellsFilled = number;
+export type Rounds = number;
+export type UncoveredRequirements = string[];
+export type ReviewsFailed = string[];
+export type ExtractedFirstPass = number;
+export type ExtractedByCoverage = number;
+export type ContextWindow = number | null;
+export type ContextPeakPct = number | null;
+export type DocParts = number;
+export type Warnings = string[];
 
 export interface Report {
   schema_version?: SchemaVersion;
@@ -158,6 +267,9 @@ export interface Report {
   summary: Summary1;
   conclusion: Conclusion;
   usage?: Usage;
+  document_title?: DocumentTitle;
+  skipped?: Skipped;
+  quality?: QualityStats | null;
 }
 export interface RunPassport {
   document_name: DocumentName;
@@ -196,6 +308,8 @@ export interface SourceLocation {
   char_end?: CharEnd;
   page?: Page;
   verified?: Verified;
+  line_start?: LineStart;
+  line_end?: LineEnd;
 }
 export interface RequirementAssessment {
   requirement_id: RequirementId;
@@ -206,6 +320,7 @@ export interface CriterionCheck {
   verdict: CheckVerdict;
   comment?: Comment;
   finding_ids?: FindingIds;
+  assessed_by?: AssessedBy;
 }
 export interface SetAssessment {
   checks: Checks1;
@@ -221,6 +336,14 @@ export interface Finding {
   locations: Locations;
   suggestion?: Suggestion;
   source?: FindingSource;
+  defect_type?: DefectType | null;
+  /**
+   * Лучшая привязка цитат замечания к тексту
+   */
+  grounding?: Grounding | null;
+  found_by?: FoundBy;
+  verifier_note?: VerifierNote;
+  resolved_by?: ResolvedBy;
 }
 /**
  * Ответ агента на пункт чек-листа «Ревью требований» из шаблона документа (если он есть).
@@ -242,6 +365,21 @@ export interface ClarifyingQuestion {
   priority?: QuestionPriority;
   finding_ids?: FindingIds2;
   options?: Options;
+  requirement_ids?: RequirementIds1;
+  answer?: Answer;
+  resolution?: QuestionResolution | null;
+}
+/**
+ * Что меняет ответ автора: новые редакции требований и снятые дефекты.
+ */
+export interface QuestionResolution {
+  rewrites?: Rewrites;
+  closes_findings?: ClosesFindings;
+  note?: Note;
+}
+export interface RequirementRewrite {
+  requirement_id: RequirementId1;
+  new_text: NewText;
 }
 export interface Summary1 {
   requirements_total: RequirementsTotal;
@@ -257,6 +395,20 @@ export interface Conclusion {
   ready_for_testing: ReadyForTesting;
   rationale: Rationale;
   top_fixes: TopFixes;
+  /**
+   * Нельзя / можно с ограничениями / можно
+   */
+  decision?: Decision | null;
+  development?: Development;
+  testing?: Testing;
+  fixes?: Fixes;
+  strengths?: Strengths;
+  guard_note?: GuardNote;
+}
+export interface FixItem {
+  action: Action;
+  why?: Why1;
+  finding_ids?: FindingIds3;
 }
 export interface Usage {
   llm_calls?: LlmCalls;
@@ -264,4 +416,42 @@ export interface Usage {
   completion_tokens?: CompletionTokens;
   cost_usd?: CostUsd;
   duration_s?: DurationS;
+}
+/**
+ * Текст документа, который нарезчик не счёл требованием (контроль покрытия нарезки).
+ */
+export interface SkippedFragment {
+  location: SourceLocation;
+  reason: Reason;
+}
+/**
+ * Контроль достоверности и покрытия прогона.
+ */
+export interface QualityStats {
+  candidates?: Candidates;
+  rejected_by_code?: RejectedByCode;
+  rejected_by_verifier?: RejectedByVerifier;
+  merged?: Merged;
+  confirmed?: Confirmed;
+  unverified?: Unverified;
+  evidence_exact?: EvidenceExact;
+  evidence_fuzzy?: EvidenceFuzzy;
+  evidence_line?: EvidenceLine;
+  inline_quotes_unverified?: InlineQuotesUnverified;
+  removed_refs?: RemovedRefs;
+  matrix_cells_total?: MatrixCellsTotal;
+  matrix_cells_filled?: MatrixCellsFilled;
+  rounds?: Rounds;
+  uncovered_requirements?: UncoveredRequirements;
+  reviews_failed?: ReviewsFailed;
+  extracted_first_pass?: ExtractedFirstPass;
+  extracted_by_coverage?: ExtractedByCoverage;
+  context_window?: ContextWindow;
+  context_peak_pct?: ContextPeakPct;
+  doc_parts?: DocParts;
+  prompt_versions?: PromptVersions;
+  warnings?: Warnings;
+}
+export interface PromptVersions {
+  [k: string]: string;
 }

@@ -224,30 +224,33 @@ class BaseLLM:
         # Вызывается перед каждым отрезком паузы (≤5 с) при повторе; исключение из него прерывает вызов.
         self.on_wait: Callable[[str], None] | None = None
         # Доп. поля тела запроса (OpenAI SDK / Anthropic SDK `extra_body`), напр. chat_template_kwargs у vLLM.
-        # Конвейер на время проверки набора подменяет его на cfg.extra_body_set_review (см. use_extra_body).
+        # Рецензенты набора подменяют его на cfg.extra_body_set_review (см. use_extra_body) — только в своём потоке:
+        # инспектор и рецензенты работают параллельно в одном пуле.
         self.extra_body: dict[str, Any] | None = getattr(cfg, "extra_body", None)
+        self._extra_tl = threading.local()
 
     def use_extra_body(self, body: dict[str, Any] | None):
-        """Контекст: временно другой extra_body (None — не менять)."""
+        """Контекст: другой extra_body для вызовов из текущего потока (None — не менять)."""
         client = self
 
         class _Ctx:
             def __enter__(self):
-                self.prev = client.extra_body
+                self.prev = getattr(client._extra_tl, "body", None)
                 if body is not None:
-                    client.extra_body = body
+                    client._extra_tl.body = body
                 return client
 
             def __exit__(self, *exc):
-                client.extra_body = self.prev
+                client._extra_tl.body = self.prev
                 return False
 
         return _Ctx()
 
     def _merged_extra(self, own: dict[str, Any] | None = None) -> dict[str, Any] | None:
-        if not self.extra_body and not own:
+        base = getattr(self._extra_tl, "body", None) or self.extra_body
+        if not base and not own:
             return None
-        out = dict(self.extra_body or {})
+        out = dict(base or {})
         for k, v in (own or {}).items():
             out[k] = {**out[k], **v} if isinstance(out.get(k), dict) and isinstance(v, dict) else v
         return out
@@ -341,6 +344,15 @@ class BaseLLM:
         msgs = [{"role": "user", "content": user}]
         reply = self._with_retry(lambda: self._call(system, msgs, None, "prompt", self.max_tokens()))
         return strip_reasoning(reply.text)
+
+    def complete_reply(self, system: str, user: str, max_tokens: int | None = None, *, name: str | None = None
+                       ) -> Reply:
+        """Текстовый ответ с признаком обрыва — для агентов, которые сами разбирают JSON (req_core.agent).
+        name — имя промта (для журналов)."""
+        msgs = [{"role": "user", "content": user}]
+        limit = max_tokens or self.max_tokens()
+        reply = self._with_retry(lambda: self._call(system, msgs, None, "prompt", limit))
+        return Reply(strip_reasoning(reply.text) if not reply.truncated else reply.text, reply.truncated)
 
     def _call_json(self, system: str, msgs: list[dict[str, str]], sch: tuple[str, dict], limit: int | None
                    ) -> Reply:

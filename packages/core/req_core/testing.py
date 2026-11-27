@@ -33,6 +33,7 @@ class FakeLLM:
         self.cfg = ProviderConfig(provider=ProviderName.OPENAI_COMPATIBLE, model=model, base_url="http://fake")
         self.usage = Usage()
         self.calls: list[dict[str, Any]] = []
+        self.context_window = 200_000  # окно модели для контроля контекста агентов
 
     def _count(self, system: str, user: str, out: str) -> None:
         self.usage.llm_calls += 1
@@ -59,6 +60,26 @@ class FakeLLM:
             result = schema.model_validate(resp)
         self._count(system, user, json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
         return result
+
+    def complete_reply(self, system: str, user: str, max_tokens: int | None = None, *, name: str | None = None):
+        """Ответ агенту req_core.agent: сценарий по имени промта (`inspector`, `reviewer`, `verifier`, `dedup`,
+        `extractor`, `extractor_gaps`, `clarifier`, `checklist`, `verdict`, `resolver`); по умолчанию «{}»."""
+        from .llm import Reply
+
+        self.calls.append({"kind": "agent", "prompt": name, "system": system, "user": user})
+        resp = self.responses.get(name or "")
+        if callable(resp) and not isinstance(resp, BaseModel):
+            resp = resp(system, user)
+        if resp is None:
+            out = "{}"
+        elif isinstance(resp, str):
+            out = resp
+        elif isinstance(resp, BaseModel):
+            out = resp.model_dump_json()
+        else:
+            out = json.dumps(resp, ensure_ascii=False)
+        self._count(system, user, out)
+        return Reply(out)
 
     def stream(self, system: str, messages: list[Any]) -> Iterator[str]:
         self.calls.append({"kind": "stream", "system": system, "messages": messages})

@@ -22,11 +22,16 @@ from req_contracts import (
     Conclusion,
     Criterion,
     CriterionCheck,
+    Decision,
+    DefectType,
     DocumentFormat,
     Finding,
     FindingScope,
     FindingSource,
+    FixItem,
+    Grounding,
     ParsedDocument,
+    QualityStats,
     QuestionPriority,
     Report,
     Requirement,
@@ -117,6 +122,21 @@ def build(text: str) -> Report:
                 suggestion="Добавить версию, дату и согласующих."),
     ]
 
+    # поля схемы 1.2 (методика bbc-agent): тип дефекта, кто нашёл, привязка цитат
+    extra = {
+        "D-001": (DefectType.CONTRADICTORY, ["reviewer:consistency", "reviewer:qa"]),
+        "D-002": (DefectType.CONTRADICTORY, ["reviewer:consistency"]),
+        "D-003": (DefectType.AMBIGUOUS, ["inspector"]),
+        "D-004": (DefectType.CONTRADICTORY, ["reviewer:contract", "reviewer:architect"]),
+        "D-005": (DefectType.INCORRECT, ["inspector", "reviewer:architect", "reviewer:security"]),
+        "D-006": (DefectType.UNVERIFIABLE, ["inspector"]),
+        "D-007": (DefectType.NONCONFORMING, ["reviewer:analyst"]),
+    }
+    for f in findings:
+        f.defect_type, f.found_by = extra[f.id]
+        f.grounding = Grounding.EXACT
+        f.verifier_note = "Подтверждено цитатами документа."
+
     by_req: dict[str, dict[Criterion, list[str]]] = {}
     for f in findings:
         for rid in f.requirement_ids:
@@ -142,7 +162,9 @@ def build(text: str) -> Report:
             set_fail.setdefault(f.criterion, []).append(f.id)
     set_assessment = SetAssessment(checks=[
         CriterionCheck(criterion=c, verdict=CheckVerdict.FAIL if c in set_fail else CheckVerdict.PASS,
-                       finding_ids=set_fail.get(c, []))
+                       finding_ids=set_fail.get(c, []),
+                       assessed_by=["Контролёр логики правил", "Контролёр согласованности спецификаций"]
+                       if c == Criterion.SET_CONSISTENT else [])
         for c in SET_CRITERIA
     ])
 
@@ -194,8 +216,21 @@ def build(text: str) -> Report:
             top_fixes=["D-002: определить правило повторного push после смены порога",
                        "D-001: согласовать дату, определяющую месяц, с критериями приёмки",
                        "D-005: разделить чтение и сохранение порога в API"],
+            decision=Decision.BLOCKED,
+            development="Можно начинать Ф-1 (настройка порога); Ф-2–Ф-4 и метод API заблокированы противоречиями.",
+            testing="Тест-кейсы можно писать по Ф-1; по критериям приёмки — после исправления D-001.",
+            fixes=[FixItem(action="Определить правило повторного push после смены порога", why="противоречие Ф-3 и Ф-4",
+                           finding_ids=["D-002"]),
+                   FixItem(action="Согласовать дату, определяющую месяц, с критериями приёмки",
+                           why="критерий приёмки нельзя выполнить", finding_ids=["D-001"]),
+                   FixItem(action="Разделить чтение и сохранение порога в API", why="GET меняет состояние",
+                           finding_ids=["D-005"])],
+            strengths=["Критерии приёмки оформлены таблицей с исходными условиями и ожидаемым результатом."],
         ),
         usage=Usage(llm_calls=0),
+        document_title="Уведомление о расходах по карте",
+        quality=QualityStats(candidates=12, rejected_by_code=1, rejected_by_verifier=2, merged=2, confirmed=7,
+                             evidence_exact=11, matrix_cells_total=54, matrix_cells_filled=54, rounds=1),
     )
 
 

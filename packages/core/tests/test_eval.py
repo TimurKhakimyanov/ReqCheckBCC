@@ -25,10 +25,19 @@ def test_reference_quotes_exist_in_sample(sample_path):
             assert loc.locate(q) is not None, (d["id"], q)
 
 
-def test_recall_on_rules_only_report(sample_path):
+def test_recall_without_model_is_zero(sample_path):
+    """Правила — только подсказки агентам: без ответов модели дефектов нет и полнота нулевая."""
     ref = json.loads((EVAL / "requirements_md_reference.json").read_text(encoding="utf-8"))
-    report = run_pipeline(parse_document(sample_path), FakeLLM())
+    r, _ = _recall_module().recall(run_pipeline(parse_document(sample_path), FakeLLM()), ref)
+    assert r == 0
+
+
+def test_recall_on_scripted_report(sample_path):
+    from test_pipeline import scripted
+
+    ref = json.loads((EVAL / "requirements_md_reference.json").read_text(encoding="utf-8"))
+    report = run_pipeline(parse_document(sample_path), scripted())
     r, rows = _recall_module().recall(report, ref)
     hit = {rid for rid, _, h in rows if h}
-    assert {"E-11", "E-18", "E-19"} <= hit  # то, что ловят детерминированные правила
+    assert {"E-01", "E-03"} <= hit  # противоречие критерия приёмки и часовой пояс
     assert 0 < r < 1

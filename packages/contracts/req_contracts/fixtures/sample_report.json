@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "passport": {
     "document_name": "requirements.md",
     "document_sha256": "e7dae55e5453a250d93e335f5ff9c7f775f4457ccddd333f4a67e47b20d74381",
@@ -32,7 +32,9 @@
         "char_start": 1362,
         "char_end": 1409,
         "page": null,
-        "verified": true
+        "verified": true,
+        "line_start": null,
+        "line_end": null
       }
     },
     {
@@ -47,7 +49,9 @@
         "char_start": 1495,
         "char_end": 1550,
         "page": null,
-        "verified": true
+        "verified": true,
+        "line_start": null,
+        "line_end": null
       }
     },
     {
@@ -62,7 +66,9 @@
         "char_start": 1691,
         "char_end": 1790,
         "page": null,
-        "verified": true
+        "verified": true,
+        "line_start": null,
+        "line_end": null
       }
     },
     {
@@ -77,7 +83,9 @@
         "char_start": 1869,
         "char_end": 1920,
         "page": null,
-        "verified": true
+        "verified": true,
+        "line_start": null,
+        "line_end": null
       }
     },
     {
@@ -92,7 +100,9 @@
         "char_start": 2277,
         "char_end": 2351,
         "page": null,
-        "verified": true
+        "verified": true,
+        "line_start": null,
+        "line_end": null
       }
     },
     {
@@ -107,7 +117,9 @@
         "char_start": 5440,
         "char_end": 5499,
         "page": null,
-        "verified": true
+        "verified": true,
+        "line_start": null,
+        "line_end": null
       }
     }
   ],
@@ -119,61 +131,71 @@
           "criterion": "necessary",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "implementation_free",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "unambiguous",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "complete",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "singular",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "feasible",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "verifiable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "correct",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "conforming",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "traceable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         }
       ]
     },
@@ -184,13 +206,15 @@
           "criterion": "necessary",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "implementation_free",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "unambiguous",
@@ -198,49 +222,57 @@
           "comment": null,
           "finding_ids": [
             "D-003"
-          ]
+          ],
+          "assessed_by": []
         },
         {
           "criterion": "complete",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "singular",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "feasible",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "verifiable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "correct",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "conforming",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "traceable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         }
       ]
     },
@@ -251,61 +283,71 @@
           "criterion": "necessary",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "implementation_free",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "unambiguous",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "complete",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "singular",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "feasible",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "verifiable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "correct",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "conforming",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "traceable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         }
       ]
     },
@@ -316,61 +358,71 @@
           "criterion": "necessary",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "implementation_free",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "unambiguous",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "complete",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "singular",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "feasible",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "verifiable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "correct",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "conforming",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "traceable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         }
       ]
     },
@@ -381,37 +433,43 @@
           "criterion": "necessary",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "implementation_free",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "unambiguous",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "complete",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "singular",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "feasible",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "verifiable",
@@ -419,25 +477,29 @@
           "comment": null,
           "finding_ids": [
             "D-006"
-          ]
+          ],
+          "assessed_by": []
         },
         {
           "criterion": "correct",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "conforming",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "traceable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         }
       ]
     },
@@ -448,43 +510,50 @@
           "criterion": "necessary",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "implementation_free",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "unambiguous",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "complete",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "singular",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "feasible",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "verifiable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "correct",
@@ -492,19 +561,22 @@
           "comment": null,
           "finding_ids": [
             "D-005"
-          ]
+          ],
+          "assessed_by": []
         },
         {
           "criterion": "conforming",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         },
         {
           "criterion": "traceable",
           "verdict": "pass",
           "comment": null,
-          "finding_ids": []
+          "finding_ids": [],
+          "assessed_by": []
         }
       ]
     }
@@ -515,7 +587,8 @@
         "criterion": "set_complete",
         "verdict": "pass",
         "comment": null,
-        "finding_ids": []
+        "finding_ids": [],
+        "assessed_by": []
       },
       {
         "criterion": "set_consistent",
@@ -525,31 +598,39 @@
           "D-001",
           "D-002",
           "D-004"
+        ],
+        "assessed_by": [
+          "Контролёр логики правил",
+          "Контролёр согласованности спецификаций"
         ]
       },
       {
         "criterion": "set_feasible",
         "verdict": "pass",
         "comment": null,
-        "finding_ids": []
+        "finding_ids": [],
+        "assessed_by": []
       },
       {
         "criterion": "set_comprehensible",
         "verdict": "pass",
         "comment": null,
-        "finding_ids": []
+        "finding_ids": [],
+        "assessed_by": []
       },
       {
         "criterion": "set_validatable",
         "verdict": "pass",
         "comment": null,
-        "finding_ids": []
+        "finding_ids": [],
+        "assessed_by": []
       },
       {
         "criterion": "set_ranked",
         "verdict": "pass",
         "comment": null,
-        "finding_ids": []
+        "finding_ids": [],
+        "assessed_by": []
       },
       {
         "criterion": "set_modifiable",
@@ -557,13 +638,15 @@
         "comment": null,
         "finding_ids": [
           "D-007"
-        ]
+        ],
+        "assessed_by": []
       },
       {
         "criterion": "set_traceable",
         "verdict": "pass",
         "comment": null,
-        "finding_ids": []
+        "finding_ids": [],
+        "assessed_by": []
       }
     ]
   },
@@ -585,7 +668,9 @@
           "char_start": 1495,
           "char_end": 1550,
           "page": null,
-          "verified": true
+          "verified": true,
+          "line_start": null,
+          "line_end": null
         },
         {
           "section": "Часть A › Критерии приемки",
@@ -593,11 +678,21 @@
           "char_start": 3068,
           "char_end": 3093,
           "page": null,
-          "verified": true
+          "verified": true,
+          "line_start": null,
+          "line_end": null
         }
       ],
       "suggestion": "Уточнить, какая дата определяет месяц (совершения или проведения), и привести критерий приёмки в соответствие.",
-      "source": "llm"
+      "source": "llm",
+      "defect_type": "contradictory",
+      "grounding": "exact",
+      "found_by": [
+        "reviewer:consistency",
+        "reviewer:qa"
+      ],
+      "verifier_note": "Подтверждено цитатами документа.",
+      "resolved_by": null
     },
     {
       "id": "D-002",
@@ -617,7 +712,9 @@
           "char_start": 1791,
           "char_end": 1857,
           "page": null,
-          "verified": true
+          "verified": true,
+          "line_start": null,
+          "line_end": null
         },
         {
           "section": "Часть A › Функциональные требования",
@@ -625,11 +722,20 @@
           "char_start": 1950,
           "char_end": 2027,
           "page": null,
-          "verified": true
+          "verified": true,
+          "line_start": null,
+          "line_end": null
         }
       ],
       "suggestion": "Явно указать, сбрасывается ли лимит одного push при изменении порога.",
-      "source": "llm"
+      "source": "llm",
+      "defect_type": "contradictory",
+      "grounding": "exact",
+      "found_by": [
+        "reviewer:consistency"
+      ],
+      "verifier_note": "Подтверждено цитатами документа.",
+      "resolved_by": null
     },
     {
       "id": "D-003",
@@ -648,11 +754,20 @@
           "char_start": 1551,
           "char_end": 1588,
           "page": null,
-          "verified": true
+          "verified": true,
+          "line_start": null,
+          "line_end": null
         }
       ],
       "suggestion": "Указать часовой пояс как смещение UTC и перечислить статусы операций, входящих в расходы.",
-      "source": "llm"
+      "source": "llm",
+      "defect_type": "ambiguous",
+      "grounding": "exact",
+      "found_by": [
+        "inspector"
+      ],
+      "verifier_note": "Подтверждено цитатами документа.",
+      "resolved_by": null
     },
     {
       "id": "D-004",
@@ -669,11 +784,21 @@
           "char_start": 2437,
           "char_end": 2493,
           "page": null,
-          "verified": true
+          "verified": true,
+          "line_start": null,
+          "line_end": null
         }
       ],
       "suggestion": "Хранить обе величины в одной единице или описать правило конвертации и округления.",
-      "source": "llm"
+      "source": "llm",
+      "defect_type": "contradictory",
+      "grounding": "exact",
+      "found_by": [
+        "reviewer:contract",
+        "reviewer:architect"
+      ],
+      "verifier_note": "Подтверждено цитатами документа.",
+      "resolved_by": null
     },
     {
       "id": "D-005",
@@ -692,7 +817,9 @@
           "char_start": 5440,
           "char_end": 5499,
           "page": null,
-          "verified": true
+          "verified": true,
+          "line_start": null,
+          "line_end": null
         },
         {
           "section": "Часть B › Общие параметры",
@@ -700,11 +827,22 @@
           "char_start": 5502,
           "char_end": 5525,
           "page": null,
-          "verified": true
+          "verified": true,
+          "line_start": null,
+          "line_end": null
         }
       ],
       "suggestion": "Разделить чтение (GET) и сохранение (PUT/POST) порога в два метода.",
-      "source": "llm"
+      "source": "llm",
+      "defect_type": "incorrect",
+      "grounding": "exact",
+      "found_by": [
+        "inspector",
+        "reviewer:architect",
+        "reviewer:security"
+      ],
+      "verifier_note": "Подтверждено цитатами документа.",
+      "resolved_by": null
     },
     {
       "id": "D-006",
@@ -723,11 +861,20 @@
           "char_start": 2310,
           "char_end": 2350,
           "page": null,
-          "verified": true
+          "verified": true,
+          "line_start": null,
+          "line_end": null
         }
       ],
       "suggestion": "Например: «95% событий передаются в сервис push не позднее 60 с при нагрузке до N событий/с».",
-      "source": "llm"
+      "source": "llm",
+      "defect_type": "unverifiable",
+      "grounding": "exact",
+      "found_by": [
+        "inspector"
+      ],
+      "verifier_note": "Подтверждено цитатами документа.",
+      "resolved_by": null
     },
     {
       "id": "D-007",
@@ -744,11 +891,20 @@
           "char_start": 3214,
           "char_end": 3261,
           "page": null,
-          "verified": true
+          "verified": true,
+          "line_start": null,
+          "line_end": null
         }
       ],
       "suggestion": "Добавить версию, дату и согласующих.",
-      "source": "rule"
+      "source": "rule",
+      "defect_type": "nonconforming",
+      "grounding": "exact",
+      "found_by": [
+        "reviewer:analyst"
+      ],
+      "verifier_note": "Подтверждено цитатами документа.",
+      "resolved_by": null
     }
   ],
   "checklist": [
@@ -783,7 +939,10 @@
       "options": [
         "Дата совершения покупки",
         "Дата проведения покупки"
-      ]
+      ],
+      "requirement_ids": [],
+      "answer": null,
+      "resolution": null
     },
     {
       "id": "Q-02",
@@ -797,7 +956,10 @@
       "options": [
         "Да, повторный push при новом пороге",
         "Нет, не больше одного push в месяц"
-      ]
+      ],
+      "requirement_ids": [],
+      "answer": null,
+      "resolution": null
     }
   ],
   "summary": {
@@ -822,7 +984,37 @@
       "D-002: определить правило повторного push после смены порога",
       "D-001: согласовать дату, определяющую месяц, с критериями приёмки",
       "D-005: разделить чтение и сохранение порога в API"
-    ]
+    ],
+    "decision": "blocked",
+    "development": "Можно начинать Ф-1 (настройка порога); Ф-2–Ф-4 и метод API заблокированы противоречиями.",
+    "testing": "Тест-кейсы можно писать по Ф-1; по критериям приёмки — после исправления D-001.",
+    "fixes": [
+      {
+        "action": "Определить правило повторного push после смены порога",
+        "why": "противоречие Ф-3 и Ф-4",
+        "finding_ids": [
+          "D-002"
+        ]
+      },
+      {
+        "action": "Согласовать дату, определяющую месяц, с критериями приёмки",
+        "why": "критерий приёмки нельзя выполнить",
+        "finding_ids": [
+          "D-001"
+        ]
+      },
+      {
+        "action": "Разделить чтение и сохранение порога в API",
+        "why": "GET меняет состояние",
+        "finding_ids": [
+          "D-005"
+        ]
+      }
+    ],
+    "strengths": [
+      "Критерии приёмки оформлены таблицей с исходными условиями и ожидаемым результатом."
+    ],
+    "guard_note": ""
   },
   "usage": {
     "llm_calls": 0,
@@ -830,5 +1022,32 @@
     "completion_tokens": 0,
     "cost_usd": null,
     "duration_s": null
+  },
+  "document_title": "Уведомление о расходах по карте",
+  "skipped": [],
+  "quality": {
+    "candidates": 12,
+    "rejected_by_code": 1,
+    "rejected_by_verifier": 2,
+    "merged": 2,
+    "confirmed": 7,
+    "unverified": 0,
+    "evidence_exact": 11,
+    "evidence_fuzzy": 0,
+    "evidence_line": 0,
+    "inline_quotes_unverified": 0,
+    "removed_refs": 0,
+    "matrix_cells_total": 54,
+    "matrix_cells_filled": 54,
+    "rounds": 1,
+    "uncovered_requirements": [],
+    "reviews_failed": [],
+    "extracted_first_pass": 0,
+    "extracted_by_coverage": 0,
+    "context_window": null,
+    "context_peak_pct": null,
+    "doc_parts": 1,
+    "prompt_versions": {},
+    "warnings": []
   }
 }

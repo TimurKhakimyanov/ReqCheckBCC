@@ -170,6 +170,7 @@
   "checklist": {
     "yes": "Yes",
     "no": "No",
+    "partial": "Partially",
     "not_required": "Not required"
   },
   "kind": {

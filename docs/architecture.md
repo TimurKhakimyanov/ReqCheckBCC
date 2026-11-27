@@ -65,16 +65,27 @@ answer_question(report: Report, history: list[ChatMessage], question: str, llm: 
 ```
 
 Требования к ядру:
-- Конвейер: парсинг → нарезка → детерминированные проверки → проверка каждого требования → **шесть рецензентов
-  набора с разными ролями** → **проверка цитат кодом** (`SourceLocation.verified`, смещения в `ParsedDocument.text`) →
-  **верификатор** (опровержение каждого дефекта и слияние дублей; `verify_pass`, по умолчанию включён) → чек-лист →
-  **уточняющие вопросы автору** (`Report.questions`) → сводка и итог. Рецензенты, верификатор и вопросы перенесены
-  из bbc-agent.
+- Конвейер — агенты bbc-agent (`req_core/agent`): чтение → правила-подсказки → нарезчик в два прохода (контроль
+  покрытия) → планировщик и воркеры (инспектор по матрице «требование × критерий», шесть рецензентов набора, раунды
+  до полного покрытия, деление большого документа под окно модели) → контроль достоверности кодом (цитаты, цитаты
+  внутри объяснений, ссылки на несуществующие объекты) → верификатор (опровержение, слияние дублей; `verify_pass`)
+  → вопросы автору и чек-лист → редакции по ответам автора (`ValidationOptions.answers`) → итог с предохранителями.
+  Агенты общаются через граф памяти; модель отвечает свободным JSON по схеме из промта
+  (`LLMClient.complete_reply`), окно модели контролируется до вызова (`ProviderConfig.context_tokens`).
 - Схема отчёта 1.1 (изменение контракта): добавлено `Report.questions: [ClarifyingQuestion]` — `id` (`Q-01`),
   `question`, `why`, `addressee`, `priority` (blocker | important | minor), `finding_ids`, `options`. Поле
   необязательное, отчёты 1.0 читаются без изменений. В `ValidationOptions` — `ask_questions=True`, `max_questions=15`,
   `verify_pass` теперь по умолчанию `True`.
-- Структурированный вывод LLM через Pydantic-схемы, temperature 0, повторы при ошибке JSON/429.
+- Схема отчёта 1.2 (изменение контракта, все поля необязательные — отчёты 1.1 читаются): у `Finding` —
+  `defect_type`, `grounding` (exact | fuzzy | line), `found_by`, `verifier_note`, `resolved_by`; у `SourceLocation` —
+  `line_start`, `line_end`; у `CriterionCheck` — `assessed_by`; у `ClarifyingQuestion` — `requirement_ids`, `answer`,
+  `resolution` (новые редакции требований, снятые дефекты); у `Conclusion` — `decision` (blocked | limited | ready),
+  `development`, `testing`, `fixes`, `strengths`, `guard_note`; у `Report` — `document_title`, `skipped`
+  (фрагменты «не требование»), `quality` (воронка кандидатов, привязка цитат, покрытие матрицы, окно модели, версии
+  промтов). `ChecklistAnswer.partial`. `ProviderConfig.context_tokens`, `ValidationOptions.answers`.
+- Ответ модели агентам — JSON по схеме из промта с разбором, спасением оборванного ответа и повтором;
+  `complete_json` (Pydantic-схемы, нативный JSON-режим провайдера) остаётся в LLM-слое. temperature 0,
+  повторы при 429/5xx.
 - Провайдеры — собственный тонкий слой над официальными SDK (`google-genai`, `openai`, `anthropic`);
   `openai_compatible` = OpenAI SDK с `base_url` (Ollama, vLLM). LiteLLM не используем (лишняя зависимость в банковском контуре).
 - `agent_version` — `git describe --always --dirty`, иначе переменная `AGENT_VERSION` (задаётся при сборке образа).

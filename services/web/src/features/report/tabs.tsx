@@ -280,6 +280,7 @@ export function ChecklistTab() {
   const variant: Record<ChecklistAnswer, 'success' | 'destructive' | 'secondary'> = {
     yes: 'success',
     no: 'destructive',
+    partial: 'secondary',
     not_required: 'secondary',
   }
   if (!items.length) return <EmptyState title={t('report.noChecklist')} hint={t('report.noChecklistHint')} />

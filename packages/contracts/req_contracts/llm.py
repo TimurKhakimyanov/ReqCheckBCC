@@ -33,6 +33,9 @@ class ProviderConfig(BaseModel):
         default=None, description="None — ядро выбирает с запасом (модели с рассуждениями тратят токены на reasoning)"
     )
     timeout_s: float = 180.0
+    context_tokens: int | None = Field(
+        default=None, ge=1000, description="Окно модели в токенах; по умолчанию — оценка по провайдеру и модели"
+    )
     min_interval_s: float = Field(default=0.0, ge=0, description="Пауза между вызовами (бесплатные тарифы, 429)")
     max_attempts: int = Field(default=6, ge=1, description="Попыток на вызов при 429/5xx/сетевых ошибках")
     extra_body: dict[str, Any] | None = Field(
@@ -67,3 +70,7 @@ class ValidationOptions(BaseModel):
     )
     batch_size: int = Field(default=6, ge=1, description="Требований в одном запросе проверки")
     concurrency: int = Field(default=1, ge=1, description="Параллельных запросов к модели")
+    answers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Ответы автора на уточняющие вопросы {Q-01: ответ} — агент предложит редакции требований",
+    )

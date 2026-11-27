@@ -1,7 +1,7 @@
 """Рендер отчёта: Markdown (основной формат), JSON, DOCX и PDF.
 
-DOCX и PDF строятся из того же Markdown (подмножество: заголовки, абзацы, списки, таблицы, жирный),
-поэтому содержание всех форматов совпадает.
+DOCX и тело PDF строятся из того же Markdown (подмножество: заголовки, абзацы, списки, таблицы, жирный),
+поэтому содержание всех форматов совпадает. У PDF есть ещё титульная страница (см. `req_core.pdf`).
 """
 
 from __future__ import annotations
@@ -14,6 +14,9 @@ from pathlib import Path
 
 from req_contracts import (
     CRITERIA,
+    Decision,
+    DefectType,
+    Grounding,
     REQUIREMENT_CRITERIA,
     CheckVerdict,
     ChecklistAnswer,
@@ -40,7 +43,27 @@ KIND_RU = {
 SEV_RU = {Severity.CRITICAL: "Критично", Severity.MAJOR: "Существенно", Severity.MINOR: "Незначительно"}
 VERDICT_RU = {CheckVerdict.PASS: "✔ соответствует", CheckVerdict.FAIL: "✘ нарушение",
               CheckVerdict.NOT_APPLICABLE: "— неприменимо"}
-ANSWER_RU = {ChecklistAnswer.YES: "Да", ChecklistAnswer.NO: "Нет", ChecklistAnswer.NOT_REQUIRED: "Не требуется"}
+ANSWER_RU = {ChecklistAnswer.YES: "Да", ChecklistAnswer.NO: "Нет", ChecklistAnswer.PARTIAL: "Частично",
+             ChecklistAnswer.NOT_REQUIRED: "Не требуется"}
+DECISION_RU = {Decision.BLOCKED: "Нельзя начинать разработку и тестирование",
+               Decision.LIMITED: "Можно с ограничениями — по части требований",
+               Decision.READY: "Можно начинать разработку и тестирование"}
+DEFECT_RU = {
+    DefectType.UNVERIFIABLE: "непроверяемое", DefectType.CONTRADICTORY: "противоречивое",
+    DefectType.INCOMPLETE: "неполное", DefectType.AMBIGUOUS: "двусмысленное",
+    DefectType.DESIGN: "лишнее проектное решение", DefectType.NOT_SINGULAR: "неатомарное",
+    DefectType.INFEASIBLE: "неосуществимое", DefectType.INCORRECT: "некорректное",
+    DefectType.NONCONFORMING: "нарушение оформления", DefectType.UNTRACEABLE: "непрослеживаемое",
+    DefectType.REDUNDANT: "избыточное / дублирующее", DefectType.RISK: "операционный риск / ИБ",
+}
+GROUNDING_RU = {Grounding.EXACT: "цитата совпала дословно", Grounding.FUZZY: "цитата с искажением, показан текст документа",
+                Grounding.LINE: "слабая привязка: цитата не найдена, показан текст указанной строки"}
+AGENT_RU = {
+    "inspector": "инспектор", "reviewer:consistency": "контролёр логики правил",
+    "reviewer:contract": "контролёр согласованности спецификаций", "reviewer:analyst": "системный аналитик",
+    "reviewer:qa": "тест-аналитик", "reviewer:architect": "архитектор интеграций",
+    "reviewer:security": "аналитик рисков и ИБ",
+}
 PRIORITY_RU = {QuestionPriority.BLOCKER: "Блокирующий", QuestionPriority.IMPORTANT: "Важный",
                QuestionPriority.MINOR: "Желательный"}
 
@@ -71,14 +94,27 @@ def _crit(c) -> str:
     return f"{info.title_ru} ({', '.join(info.references)})"
 
 
+def _lines(loc: SourceLocation) -> str:
+    if loc.line_start is None:
+        return "—"
+    return f"{loc.line_start}" if loc.line_end in (None, loc.line_start) else f"{loc.line_start}–{loc.line_end}"
+
+
 def _where(loc: SourceLocation) -> str:
     parts = [loc.section]
     if loc.page:
         parts.append(f"стр. {loc.page}")
-    if loc.char_start is not None and loc.char_end is not None:
+    if loc.line_start is not None:
+        parts.append(("строка " if loc.line_end in (None, loc.line_start) else "строки ") + _lines(loc))
+    elif loc.char_start is not None and loc.char_end is not None:
         parts.append(f"символы {loc.char_start}–{loc.char_end}")
     mark = "цитата подтверждена в тексте" if loc.verified else "⚠ цитата модели не найдена в тексте дословно"
     return ", ".join(parts) + f" ({mark})"
+
+
+def _check_comment(c) -> str:
+    """«D-003: комментарий», «D-003» или «комментарий» — без висячего двоеточия."""
+    return ": ".join(x for x in (", ".join(c.finding_ids), _one_line(c.comment or "")) if x)
 
 
 def _finding_block(f: Finding) -> list[str]:
@@ -93,7 +129,17 @@ def _finding_block(f: Finding) -> list[str]:
     out.append(f"- **Почему это нарушение:** {_one_line(f.explanation)}")
     if f.suggestion:
         out.append(f"- **Как исправить:** {_one_line(f.suggestion)}")
+    if f.defect_type:
+        out.append(f"- **Тип дефекта:** {DEFECT_RU[f.defect_type]}")
     out.append(f"- **Критерий:** {_crit(f.criterion)}; источник: {src}")
+    if f.found_by:
+        out.append(f"- **Кто нашёл:** {', '.join(AGENT_RU.get(a, a) for a in f.found_by)}")
+    if f.grounding:
+        out.append(f"- **Привязка к тексту:** {GROUNDING_RU[f.grounding]}")
+    if f.verifier_note:
+        out.append(f"- **Верификатор:** {_one_line(f.verifier_note)}")
+    if f.resolved_by:
+        out.append(f"- **Снимается ответом автора на {f.resolved_by}**")
     out.append("")
     return out
 
@@ -118,6 +164,7 @@ def render_markdown(report: Report) -> str:
     u = report.usage
     L += ["## 1. Паспорт прогона", ""]
     rows = [
+        *([["Название документа", report.document_title]] if report.document_title else []),
         ["Документ", p.document_name],
         ["SHA-256 документа", f"`{p.document_sha256}`"],
         ["Формат", report.document.format.value.upper()],
@@ -131,6 +178,13 @@ def render_markdown(report: Report) -> str:
     ]
     if u.duration_s is not None:
         rows.append(["Длительность", f"{u.duration_s:.0f} с"])
+    qs = report.quality
+    if qs and qs.context_window:
+        rows.append(["Окно модели / пик загрузки",
+                     f"{qs.context_window:,} токенов / {qs.context_peak_pct or 0:g} %".replace(",", " ")
+                     + (f"; документ проверялся по частям: {qs.doc_parts}" if qs.doc_parts > 1 else "")])
+    if qs and qs.prompt_versions:
+        rows.append(["Версии промтов", ", ".join(f"{k} v{v}" for k, v in qs.prompt_versions.items())])
     L += _table(["Параметр", "Значение"], rows) + [""]
 
     # 2. Нарезка
@@ -155,6 +209,14 @@ def render_markdown(report: Report) -> str:
             + (f", стр. {r.location.page}" if r.location.page else "") + "*",
         ])
     L += _table(["ID в отчёте", "ID в документе", "Тип", "Формулировка и цитата"], rows) + [""]
+    if qs and (qs.extracted_by_coverage or qs.extracted_first_pass):
+        L += [f"Первый проход нарезки — {qs.extracted_first_pass} требований; контроль покрытия добавил "
+              f"{qs.extracted_by_coverage} (строки, не вошедшие ни в одно требование, перепроверены моделью).", ""]
+    if report.skipped:
+        L += ["### Фрагменты, которые агент не счёл требованиями", ""]
+        L += _table(["Строки", "Текст", "Причина"], [
+            [_lines(k.location), f"«{_short(k.location.quote, 160)}»", _one_line(k.reason)] for k in report.skipped
+        ]) + [""]
 
     # 3. Проверка каждого требования
     L += ["## 3. Проверка каждого требования", ""]
@@ -180,7 +242,7 @@ def render_markdown(report: Report) -> str:
             fails = [c for c in a.checks if c.verdict == CheckVerdict.FAIL]
             L += _table(["Критерий", "Результат", "Комментарий"], [
                 [_crit(c.criterion), VERDICT_RU[c.verdict],
-                 (", ".join(c.finding_ids) + ": " if c.finding_ids else "") + (c.comment or "")]
+                 _check_comment(c)]
                 for c in a.checks
             ]) + [""]
             if not fails:
@@ -201,7 +263,7 @@ def render_markdown(report: Report) -> str:
     L += ["## 4. Проверка всего набора требований", ""]
     L += _table(["Критерий набора", "Результат", "Комментарий"], [
         [_crit(c.criterion), VERDICT_RU[c.verdict],
-         (", ".join(c.finding_ids) + ": " if c.finding_ids else "") + _one_line(c.comment or "")]
+         _check_comment(c) + (f" (оценили: {', '.join(c.assessed_by)})" if c.assessed_by else "")]
         for c in report.set_assessment.checks
     ]) + [""]
     set_f = [f for f in report.findings if f.scope == FindingScope.SET]
@@ -235,6 +297,15 @@ def render_markdown(report: Report) -> str:
                                                             for i, o in enumerate(q.options)))
             if q.finding_ids:
                 L.append(f"- **Связанные дефекты:** {', '.join(q.finding_ids)}")
+            if q.answer:
+                L.append(f"- **Ответ автора:** {_one_line(q.answer)}")
+            if q.resolution:
+                for rw in q.resolution.rewrites:
+                    L.append(f"- **Новая редакция {rw.requirement_id}:** {_one_line(rw.new_text)}")
+                if q.resolution.closes_findings:
+                    L.append(f"- **Снимает дефекты:** {', '.join(q.resolution.closes_findings)}")
+                if q.resolution.note:
+                    L.append(f"- **Примечание:** {_one_line(q.resolution.note)}")
             L.append("")
         n += 1
 
@@ -266,22 +337,60 @@ def render_markdown(report: Report) -> str:
         ]) + [""]
     else:
         L += ["Критичных дефектов не найдено.", ""]
+    if qs:
+        L += ["### Контроль достоверности и покрытия", ""]
+        rows = [
+            ["Кандидатов в замечания от всех агентов", str(qs.candidates)],
+            ["Отклонено кодом (цитата не найдена или выдумана)", str(qs.rejected_by_code)],
+            ["Отклонено верификатором", str(qs.rejected_by_verifier)],
+            ["Слито дублей", str(qs.merged)],
+            ["Подтверждено", str(qs.confirmed)],
+            ["Привязка цитат: дословно / с искажением / по строке",
+             f"{qs.evidence_exact} / {qs.evidence_fuzzy} / {qs.evidence_line}"],
+            ["Матрица «требование × критерий»: заполнено", f"{qs.matrix_cells_filled} из {qs.matrix_cells_total}"
+             + (f" (раундов: {qs.rounds})" if qs.rounds else "")],
+        ]
+        if qs.unverified:
+            rows.append(["Оставлено без ответа верификатора", str(qs.unverified)])
+        if qs.inline_quotes_unverified:
+            rows.append(["Цитаты в тексте замечаний, которых нет в документе", str(qs.inline_quotes_unverified)])
+        if qs.removed_refs:
+            rows.append(["Удалено ссылок на несуществующие требования и замечания", str(qs.removed_refs)])
+        if qs.uncovered_requirements:
+            rows.append(["Не проверены по всем критериям", ", ".join(qs.uncovered_requirements)])
+        if qs.reviews_failed:
+            rows.append(["Рецензенты без ответа", ", ".join(AGENT_RU.get("reviewer:" + k, k) for k in qs.reviews_failed)])
+        L += _table(["Показатель", "Значение"], rows) + [""]
 
     # Итог
     c = report.conclusion
     L += [f"## {n + 1}. Итог", ""]
+    if c.decision:
+        L += [f"**Решение: {DECISION_RU[c.decision]}.**" + (f" *({c.guard_note})*" if c.guard_note else ""), ""]
     L += [f"- **Можно начинать разработку:** {'да' if c.ready_for_development else 'нет'}",
           f"- **Можно начинать тестирование:** {'да' if c.ready_for_testing else 'нет'}", ""]
     L += [_one_line(c.rationale), ""]
-    if c.top_fixes:
+    if c.development:
+        L += [f"**Разработка.** {_one_line(c.development)}", ""]
+    if c.testing:
+        L += [f"**Тестирование.** {_one_line(c.testing)}", ""]
+    if c.fixes:
+        L += ["**Что исправить в первую очередь:**", ""]
+        L += [f"{i}. {_one_line(fx.action)}" + (f" — {_one_line(fx.why)}" if fx.why else "")
+              + (f" ({', '.join(fx.finding_ids)})" if fx.finding_ids else "")
+              for i, fx in enumerate(c.fixes, 1)] + [""]
+    elif c.top_fixes:
         L += ["**Что исправить в первую очередь:**", ""]
         L += [f"{i}. {_one_line(x)}" for i, x in enumerate(c.top_fixes, 1)] + [""]
+    if c.strengths:
+        L += ["**Сильные стороны документа:**", ""]
+        L += [f"- {_one_line(x)}" for x in c.strengths] + [""]
 
     L += ["---", "",
-          f"*Методика: нарезка требований (LLM + правила), детерминированные проверки (размытые слова, «TBD», "
-          f"пустые поля шаблона, версия), проверка каждого требования моделью, проверка набора шестью "
-          f"рецензентами с разными ролями, проверка цитат кодом, верификатор (опровержение и слияние дублей), "
-          f"уточняющие вопросы автору. "
+          f"*Методика bbc-agent: нарезка требований в два прохода (модель + контроль покрытия + кандидаты правил), "
+          f"детерминированные правила как подсказки агентам, инспектор по матрице «требование × критерий» с раундами "
+          f"до полного покрытия, шесть рецензентов набора с разными ролями, контроль достоверности кодом (цитаты, "
+          f"ссылки), верификатор (опровержение и слияние дублей), уточняющие вопросы автору и итог руководителя ревью. "
           f"Агент ReqCheck {p.agent_version}, схема отчёта {report.schema_version}.*", ""]
     return "\n".join(L)
 
@@ -420,69 +529,11 @@ def _find_font() -> tuple[str, str]:
                        "или REQCHECK_PDF_FONT_DIR)")
 
 
-def render_pdf(md: str) -> bytes:
-    from fpdf import FPDF
+def render_pdf(report: Report, md: str | None = None) -> bytes:
+    """PDF: титульная страница из `Report` + тело из того же Markdown (вёрстка — в `req_core.pdf`)."""
+    from .pdf import render_pdf_report
 
-    regular, bold = _find_font()
-    pdf = FPDF(format="A4")
-    pdf.set_margins(14, 14, 14)
-    pdf.set_auto_page_break(True, 14)
-    pdf.add_font("DejaVu", "", regular)
-    pdf.add_font("DejaVu", "B", bold)
-    pdf.add_font("DejaVu", "I", regular)
-    pdf.add_font("DejaVu", "BI", bold)
-    pdf.add_page()
-    pdf.set_font("DejaVu", "", 9.5)
-    width = pdf.w - pdf.l_margin - pdf.r_margin
-
-    def write_inline(text: str, size: float = 9.5, h: float = 5.0, prefix: str = "") -> None:
-        if prefix:
-            pdf.set_font("DejaVu", "", size)
-            pdf.write(h, prefix)
-        for st, t in _inline_segments(text):
-            pdf.set_font("DejaVu", "B" if st == "B" else "", size)
-            pdf.write(h, t)
-        pdf.ln(h + 1)
-
-    for b in _blocks(md):
-        kind = b[0]
-        if kind == "heading":
-            size = {1: 15, 2: 13, 3: 11, 4: 10}.get(b[1], 10)
-            pdf.ln(2)
-            pdf.set_font("DejaVu", "B", size)
-            pdf.multi_cell(width, size * 0.5, _plain(b[2]), new_x="LMARGIN", new_y="NEXT")
-            pdf.ln(1)
-        elif kind == "table":
-            header, rows = b[1], b[2]
-            ncol = len(header)
-            lens = [max([len(_plain(header[j]))] + [len(_plain(r[j])) if j < len(r) else 0 for r in rows])
-                    for j in range(ncol)]
-            weights = [min(max(x, 6), 120) for x in lens]
-            total = sum(weights)
-            cols = [max(14.0, width * w / total) for w in weights]
-            scale = width / sum(cols)
-            cols = [c * scale for c in cols]
-            pdf.set_font("DejaVu", "", 8)
-            with pdf.table(col_widths=cols, width=width, line_height=4.2, text_align="LEFT",
-                           first_row_as_headings=True) as table:
-                hr = table.row()
-                for h in header:
-                    hr.cell(_plain(h))
-                for r in rows:
-                    row = table.row()
-                    for j in range(ncol):
-                        row.cell(_plain(r[j]) if j < len(r) else "")
-            pdf.ln(2)
-            pdf.set_font("DejaVu", "", 9.5)
-        elif kind == "bullet":
-            write_inline(b[1], prefix="• ")
-        elif kind in ("number", "para"):
-            write_inline(b[1])
-        elif kind == "rule":
-            y = pdf.get_y() + 1
-            pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
-            pdf.ln(3)
-    return bytes(pdf.output())
+    return render_pdf_report(report, md)
 
 
 # ---------------------------------------------------------------- вход
@@ -497,5 +548,5 @@ def render_report(report: Report, fmt: str) -> bytes:
     if fmt == "docx":
         return render_docx(md)
     if fmt == "pdf":
-        return render_pdf(md)
+        return render_pdf(report, md)
     raise ValueError(f"Неизвестный формат отчёта: {fmt} (md, json, docx, pdf)")

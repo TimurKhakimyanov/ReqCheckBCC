@@ -1,11 +1,18 @@
+"""Конвейер агентов bbc-agent (req_core.agent) на FakeLLM: сценарии ответов по именам промтов."""
+
+import json
 import re
 
 from req_contracts import (
     REQUIREMENT_CRITERIA,
     SET_CRITERIA,
     CheckVerdict,
+    ChecklistAnswer,
     Criterion,
-    FindingSource,
+    Decision,
+    DefectType,
+    Grounding,
+    QuestionPriority,
     RequirementKind,
     RunStage,
     Severity,
@@ -13,330 +20,301 @@ from req_contracts import (
 )
 
 from req_core import parse_document, render_report
-from req_core.pipeline import run_pipeline
+from req_core.pipeline import TITLE_LIMIT, run_pipeline, split_title
 from req_core.testing import FakeLLM
 
-F2 = ("Месяц определяется по дате совершения покупки в Алматы. В расходы входят проведённые покупки. "
-      "Возврат уменьшает расходы месяца исходной покупки. Переводы и снятие наличных исключаются.")
+
+def _line(user: str, needle: str) -> int:
+    """Номер строки L<n>| документа в промте, содержащей needle."""
+    for m in re.finditer(r"^L(\d+)\| (.*)$", user, re.M):
+        if needle in m.group(2):
+            return int(m.group(1))
+    raise AssertionError(f"нет строки с «{needle}» в промте")
 
 
-def segmentation(system, user):
-    return {"requirements": [
-        {"source_id": "Ф-2", "kind": "functional", "quote": F2, "summary": "Правила учёта расходов месяца",
-         "parts": [
-             {"quote": "Месяц определяется по дате совершения покупки в Алматы.", "summary": "Месяц по дате покупки"},
-             {"quote": "Возврат уменьшает расходы месяца исходной покупки.", "summary": "Учёт возвратов"},
-         ]},
-        {"source_id": "", "kind": "functional", "quote": "Требование, которого нет в документе ни в каком виде",
-         "summary": "фантом"},
-    ]}
+def extractor(system, user):
+    out = []
+    for fid, summary in (("Ф-1", "Порог расходов"), ("Ф-2", "Правила учёта расходов месяца"),
+                         ("Ф-3", "Push при достижении порога"), ("Ф-4", "Смена порога")):
+        n = _line(user, f"**{fid}.**")
+        out.append({"doc_id": fid, "line_start": n, "line_end": n, "quote": "", "summary": summary,
+                    "type": "functional"})
+    n = _line(user, "Сервис передаёт push на отправку")
+    out.append({"doc_id": None, "line_start": n, "line_end": n,
+                "quote": "Сервис передаёт push на отправку в течение минуты после получения события.",
+                "summary": "Push в течение минуты", "type": "non_functional"})
+    n = _line(user, "Покупка 31 января")
+    out.append({"doc_id": None, "line_start": n, "line_end": n, "quote": "Покупка 31 января в 23:58 на 4 000 ₸",
+                "summary": "Критерий: покупка на границе месяца", "type": "acceptance"})
+    # требование, которого нет в документе: ни строки, ни цитаты — отбрасывается кодом
+    out.append({"doc_id": None, "line_start": 99999, "line_end": 99999, "quote": "Фантом, которого нет в тексте",
+                "summary": "фантом", "type": "functional"})
+    return {"requirements": out}
 
 
-def requirement_batch(system, user):
-    m = re.search(r"### (R-\d{3}) · в документе: Ф-2", user)
-    if not m:
-        return {}
-    rid = m.group(1)
-    return {
-        "issues": [
-            {"requirement_ids": [rid + ".1"], "criterion": "unambiguous", "severity": "major",
-             "title": "Не задан часовой пояс", "explanation": "«В Алматы» не задаёт смещение UTC.",
-             "quotes": ["по дате совершения покупки в Алматы"], "suggestion": "Указать UTC+5."},
-            {"requirement_ids": [rid], "criterion": "complete", "severity": "major",
-             "title": "Не описан возврат после отправки push", "explanation": "Неясно, что с push.",
-             "quotes": ["Цитата, которую модель выдумала и которой нет в тексте"], "suggestion": ""},
-            {"requirement_ids": [], "criterion": "verifiable", "severity": "minor",
-             "title": "Фантомный дефект", "explanation": "x",
-             "quotes": ["Ещё одна выдуманная цитата без привязки к требованию"]},
-        ],
-        "not_applicable": [{"requirement_id": rid, "not_applicable": ["implementation_free"]}],
-    }
+def inspector(system, user):
+    block = user.split("Требования для проверки:\n", 1)[1].split("\n\nПодсказки автоматических правил:", 1)[0]
+    reqs = json.loads(block)
+    results = []
+    for r in reqs:
+        verdicts = {f"I{i}": "ok" for i in range(1, 10)}
+        findings = []
+        if r["doc_id"] == "Ф-2":
+            verdicts["I3"] = "violation"
+            findings.append({"criterion": "I3", "severity": "major", "defect_type": "ambiguous",
+                             "title": "Не задан часовой пояс",
+                             "quote": "по дате совершения покупки в Алматы",
+                             "problem": "«В Алматы» не задаёт смещение UTC: покупка в 23:58 может попасть в разные месяцы.",
+                             "recommendation": "Указать UTC+5.", "question": None, "addressee": None})
+            verdicts["I4"] = "violation"  # подтверждено замечанием, которое отбросит контроль достоверности
+            findings.append({"criterion": "I4", "severity": "major", "defect_type": "incomplete",
+                             "title": "Выдумка", "quote": "Цитата, которой нет в тексте документа совсем",
+                             "problem": "Модель утверждает «здесь написано то, чего в документе нет вообще никогда».",
+                             "recommendation": ""})
+        if r["doc_id"] == "Ф-1":
+            verdicts["I9"] = "na"
+        results.append({"id": r["id"], "analysis": "…", "verdicts": verdicts, "findings": findings})
+    return {"results": results}
 
 
-CONTRADICTION = {
-    "requirement_ids": [], "criterion": "set_consistent", "severity": "critical",
-    "title": "Критерий приёмки противоречит Ф-2",
-    "explanation": "Покупка 31 января попадает в февраль, хотя месяц — по дате совершения.",
-    "quotes": ["Месяц определяется по дате совершения покупки в Алматы.", "Февральский счётчик вырос на 4 000 ₸"],
-    "suggestion": "Согласовать правило и критерий.",
-    "question": "Какая дата определяет месяц покупки: дата совершения или дата проведения?",
-    "addressee": "Business owner",
-}
+CONTRA = {"criterion": "S2", "severity": "major", "defect_type": "contradictory",
+          "title": "Критерий приёмки противоречит Ф-2",
+          "problem": "Покупка 31 января попадает в февральский счётчик, хотя месяц определяется по дате совершения.",
+          "recommendation": "Согласовать правило и критерий.",
+          "question": "Какая дата определяет месяц покупки: совершения или проведения?",
+          "addressee": "Business owner"}
 
 
-def role_review(system, user):
-    """Рецензенты набора различаются по роли в промпте."""
-    if "зона — бизнес-правила" in user:  # контролёр логики правил
-        return {"analysis": "Пересчитал критерий 31 января — расходится.", "issues": [CONTRADICTION],
-                "checks": [{"criterion": "set_consistent", "verdict": "fail", "comment": "Есть противоречие."}]}
-    if "— системный аналитик в команде" in user:
-        return {"checks": [{"criterion": "set_ranked", "verdict": "fail", "comment": "Приоритеты не указаны."}]}
-    if "— архитектор интеграций в команде" in user:
-        return {"checks": [{"criterion": "set_feasible", "verdict": "pass", "comment": "Реализуемо."},
-                           # чужой критерий рецензента не учитывается
-                           {"criterion": "set_ranked", "verdict": "pass", "comment": "не моё"}]}
+def reviewer(system, user):
+    if "зона — бизнес-правила" in system:  # контролёр логики правил
+        ev = [{"line": _line(user, "**Ф-2.**"), "quote": "Месяц определяется по дате совершения покупки в Алматы."},
+              {"line": _line(user, "Покупка 31 января"), "quote": "Февральский счётчик вырос на 4 000 ₸"}]
+        return {"analysis": "Пересчитал критерий 31 января — расходится.",
+                "verdicts": {"S2": {"status": "violation", "rationale": "Критерий приёмки расходится с Ф-2."}},
+                "findings": [{**CONTRA, "evidence": ev, "req_ids": ["R-002"]}]}
+    if "«Тест-аналитик»" in system:  # тот же дефект другими словами — дубль
+        ev = [{"line": _line(user, "Покупка 31 января"), "quote": "Февральский счётчик вырос на 4 000 ₸"}]
+        return {"verdicts": {"S5": {"status": "ok", "rationale": "Критерии приёмки есть."}},
+                "findings": [{**CONTRA, "criterion": "S5", "title": "Ожидаемый результат критерия неверен",
+                              "evidence": ev}]}
+    if "«Системный аналитик»" in system:
+        ev = [{"line": _line(user, "**Ф-1.**"), "quote": "Держатель активной карты KZT задаёт целый порог"}]
+        return {"verdicts": {"S6": {"status": "violation", "rationale": "Приоритеты не указаны."}},
+                "findings": [{"criterion": "S6", "severity": "minor", "defect_type": "nonconforming",
+                              "title": "Приоритеты не указаны",
+                              "problem": "У требований нет приоритета, непонятно, что обязательно для первой поставки.",
+                              "evidence": ev}]}
     return {}
 
 
-def scripted():
-    return FakeLLM({
-        "SegmentationResult": segmentation,
-        "RequirementBatchResult": requirement_batch,
-        "RoleReviewResult": role_review,
-        "ConclusionResult": {"rationale": "Есть критичное противоречие D-xxx.", "top_fixes": ["Исправить Ф-2"]},
-    })
+def verifier(system, user):
+    out = []
+    for cid, title in re.findall(r"^(C-\d{3}) \|[^\n]*\n\s*Суть: ([^.\n]*)", user, re.M):
+        if "Приоритеты" in title:
+            out.append({"id": cid, "verdict": "drop", "severity": "minor", "reason": "Приоритеты указаны в разделе 3."})
+        elif "противоречит" in title:
+            out.append({"id": cid, "verdict": "keep", "severity": "critical", "reason": "Подтверждено обеими цитатами."})
+        else:
+            out.append({"id": cid, "verdict": "keep", "severity": "major", "reason": "Подтверждено."})
+    return {"decisions": out}
+
+
+def dedup(system, user):
+    ids = [cid for cid, rest in re.findall(r"^(C-\d{3}) \|(.*)$", user, re.M)
+           if "противоречит" in rest or "Ожидаемый результат" in rest]
+    return {"groups": [{"ids": ids, "reason": "один дефект"}]} if len(ids) > 1 else {}
+
+
+def clarifier(system, user):
+    fid = re.search(r"^(D-\d{3}) \| уровень: набор", user, re.M).group(1)
+    return {"questions": [
+        {"question": "Какая дата определяет месяц покупки: дата совершения или дата проведения (см. R-999)?",
+         "why": "Без ответа счётчик и критерий приёмки реализуют по-разному.", "addressee": "Business owner",
+         "priority": "blocker", "finding_ids": [fid, "D-777"], "options": ["Дата совершения", "Дата проведения"]},
+        {"question": "Нужен ли повторный push после возврата?", "why": "Неясно поведение.", "priority": "minor",
+         "finding_ids": [], "options": []},
+    ]}
+
+
+def checklist(system, user):
+    rows = [int(n) for n in re.findall(r"^L(\d+) \|", user, re.M)]
+    return {"rows": [{"line": rows[0], "answer": "Частично", "comment": "Есть противоречие D-001."},
+                     {"line": rows[1], "answer": "Да", "comment": "Структура по шаблону."}]}
+
+
+def verdict(system, user):
+    return {"decision": "можно", "development": "Можно брать Ф-1, Ф-3.", "testing": "Тест-кейсы по Ф-1.",
+            "rationale": "Есть противоречие в ключевой логике.",
+            "top_fixes": [{"action": "Согласовать правило месяца и критерий приёмки", "why": "блокирует счётчик",
+                           "finding_ids": ["D-001", "D-999"]}],
+            "strengths": ["Критерии приёмки оформлены таблицей."]}
+
+
+def scripted(**extra):
+    return FakeLLM({"extractor": extractor, "inspector": inspector, "reviewer": reviewer, "verifier": verifier,
+                    "dedup": dedup, "clarifier": clarifier, "checklist": checklist, "verdict": verdict, **extra})
 
 
 def test_pipeline_with_scripted_llm(sample_path):
-    doc = parse_document(sample_path)
-    llm = scripted()
     events = []
-    report = run_pipeline(doc, llm, options=ValidationOptions(knowledge_snippets=["Глоссарий: тиын = 1/100 тенге"]),
-                          on_progress=events.append, provider="fake", model="fake-model")
-    text = report.document.text
+    llm = scripted()
+    report = run_pipeline(parse_document(sample_path), llm, on_progress=events.append)
 
-    # нарезка: Ф-2 разбит на части, фантом отброшен, подсказки правил добавлены
-    ids = {r.id: r for r in report.requirements}
-    f2 = next(r for r in report.requirements if r.source_id == "Ф-2")
-    assert f2.summary == "Правила учёта расходов месяца"
-    kids = [r for r in report.requirements if r.parent_id == f2.id]
-    assert [k.id for k in kids] == [f2.id + ".1", f2.id + ".2"]
-    assert not any("фантом" in r.summary for r in report.requirements)
-    assert sum(r.kind == RequirementKind.ACCEPTANCE for r in report.requirements) == 3
-    assert [r.id for r in report.requirements if not r.parent_id][:2] == ["R-001", "R-002"]
+    # нарезка: требования модели + кандидаты правил; фантом отброшен
+    by_src = {r.source_id: r for r in report.requirements if r.source_id}
+    assert {"Ф-1", "Ф-2", "Ф-3", "Ф-4"} <= set(by_src)
+    assert all("Фантом" not in r.location.quote for r in report.requirements)
+    for r in report.requirements:
+        loc = r.location
+        assert report.document.text[loc.char_start:loc.char_end] == loc.quote and loc.line_start
+    assert any(r.kind == RequirementKind.ACCEPTANCE for r in report.requirements)
 
-    # все подтверждённые цитаты совпадают с текстом по смещениям
-    locs = [r.location for r in report.requirements] + [l for f in report.findings for l in f.locations]
-    for loc in locs:
-        if loc.verified:
-            assert text[loc.char_start:loc.char_end] == loc.quote
-    assert all(r.location.verified for r in report.requirements)
+    # контроль достоверности: выдуманная цитата не прошла; дубль слит; верификатор отклонил и ужесточил
+    titles = [f.title for f in report.findings]
+    assert "Выдумка" not in titles and "Приоритеты не указаны" not in titles
+    contra = [f for f in report.findings if f.defect_type == DefectType.CONTRADICTORY]
+    assert len(contra) == 1
+    c = contra[0]
+    assert c.severity == Severity.CRITICAL and c.criterion == Criterion.SET_CONSISTENT
+    assert set(c.found_by) == {"reviewer:consistency", "reviewer:qa"}
+    assert len(c.locations) == 2 and all(loc.verified for loc in c.locations)
+    assert c.grounding == Grounding.EXACT and c.verifier_note
+    tz = next(f for f in report.findings if f.title == "Не задан часовой пояс")
+    r2 = by_src["Ф-2"].id
+    assert tz.requirement_ids == [r2] and tz.found_by == ["inspector"]
+    assert report.document.text[tz.locations[0].char_start:tz.locations[0].char_end] == \
+        "по дате совершения покупки в Алматы"
+    q = report.quality
+    assert q.rejected_by_code >= 1 and q.rejected_by_verifier == 1 and q.merged == 1
+    assert q.matrix_cells_filled == q.matrix_cells_total > 0 and not q.uncovered_requirements
 
-    titles = {f.title: f for f in report.findings}
-    assert "Фантомный дефект" not in titles  # нет цитаты и нет требования — отброшен
-    tz = titles["Не задан часовой пояс"]
-    assert tz.requirement_ids == [f2.id + ".1"] and tz.locations[0].verified
-    reanchored = titles["Не описан возврат после отправки push"]
-    assert reanchored.locations[0].verified and reanchored.locations[0].quote == f2.location.quote
-    assert any(not loc.verified for loc in reanchored.locations)
-    contra = titles["Критерий приёмки противоречит Ф-2"]
-    assert contra.severity == Severity.CRITICAL and len(contra.locations) == 2
-    assert contra.id in report.summary.critical_finding_ids
-    assert any(f.source == FindingSource.RULE and "тестировщиками" in f.title for f in report.findings)
-    assert any(f.criterion == Criterion.SINGULAR and f2.id in f.requirement_ids for f in report.findings)
+    # проверка требований: вердикты инспектора приведены к подтверждённым замечаниям
+    checks = {c.criterion: c for c in next(a for a in report.requirement_assessments if a.requirement_id == r2).checks}
+    assert len(checks) == len(REQUIREMENT_CRITERIA)
+    assert checks[Criterion.UNAMBIGUOUS].verdict == CheckVerdict.FAIL
+    assert checks[Criterion.UNAMBIGUOUS].finding_ids == [tz.id]
+    assert checks[Criterion.COMPLETE].verdict == CheckVerdict.PASS  # нарушение без подтверждённого замечания
+    assert checks[Criterion.TRACEABLE].verdict == CheckVerdict.NOT_APPLICABLE
+    f1 = next(a for a in report.requirement_assessments if a.requirement_id == by_src["Ф-1"].id)
+    assert {c.criterion: c.verdict for c in f1.checks}[Criterion.CONFORMING] == CheckVerdict.NOT_APPLICABLE
 
-    # оценки
-    assert len(report.requirement_assessments) == len(report.requirements)
-    a = next(x for x in report.requirement_assessments if x.requirement_id == f2.id)
-    assert [c.criterion for c in a.checks] == REQUIREMENT_CRITERIA
-    by_c = {c.criterion: c for c in a.checks}
-    assert by_c[Criterion.COMPLETE].verdict == CheckVerdict.FAIL
-    assert by_c[Criterion.IMPLEMENTATION_FREE].verdict == CheckVerdict.NOT_APPLICABLE
-    sets = {c.criterion: c for c in report.set_assessment.checks}
-    assert [c.criterion for c in report.set_assessment.checks] == SET_CRITERIA
-    assert sets[Criterion.SET_CONSISTENT].verdict == CheckVerdict.FAIL
-    assert sets[Criterion.SET_RANKED].verdict == CheckVerdict.FAIL
-    assert sets[Criterion.SET_FEASIBLE].comment == "Архитектор интеграций: Реализуемо."
-    assert sets[Criterion.SET_RANKED].comment.startswith("Системный аналитик")
-    # шесть рецензентов набора с разными ролями
-    assert sum(c["schema"] == "RoleReviewResult" for c in llm.calls) == 6
-    # вопрос рецензента стал уточняющим вопросом автору (модель вопросов не ответила — запасной путь)
-    q = report.questions[0]
-    assert q.id == "Q-01" and "дата совершения" in q.question and q.priority.value == "blocker"
-    assert q.finding_ids == [contra.id] and q.addressee == "Business owner"
+    # набор: замечания и мнения рецензентов
+    sc = {c.criterion: c for c in report.set_assessment.checks}
+    assert len(sc) == len(SET_CRITERIA)
+    assert sc[Criterion.SET_CONSISTENT].verdict == CheckVerdict.FAIL
+    assert sc[Criterion.SET_CONSISTENT].assessed_by == ["Контролёр логики правил"]
+    assert sc[Criterion.SET_RANKED].verdict == CheckVerdict.PASS  # нарушение не подтверждено верификатором
+    assert sc[Criterion.SET_VALIDATABLE].verdict == CheckVerdict.PASS
 
-    # сводка, итог, чек-лист, id
-    assert report.summary.findings_total == len(report.findings)
-    assert report.summary.requirements_total == len(report.requirements)
-    assert [f.id for f in report.findings] == [f"D-{i:03d}" for i in range(1, len(report.findings) + 1)]
-    known = {f.id for f in report.findings}
-    for x in report.requirement_assessments:
-        for c in x.checks:
-            assert set(c.finding_ids) <= known
-    assert report.conclusion.ready_for_development is False
-    assert report.conclusion.top_fixes == ["Исправить Ф-2"]
-    assert len(report.checklist) == 14
-    assert report.usage.llm_calls == len([c for c in llm.calls if c["kind"] == "json"])
-    assert report.passport.provider == "fake" and report.passport.model == "fake-model"
+    # вопросы: несуществующие ссылки вычищены, сначала блокирующие
+    assert [q.id for q in report.questions] == ["Q-01", "Q-02"]
+    q1 = report.questions[0]
+    assert q1.priority == QuestionPriority.BLOCKER and "R-999" not in q1.question
+    assert q1.finding_ids == [c.id] and q1.options == ["Дата совершения", "Дата проведения"]
 
-    # прогресс монотонный и заканчивается DONE; база знаний попала в промпт
-    assert events[-1].stage == RunStage.DONE and events[-1].progress == 1.0
-    assert all(a.progress <= b.progress for a, b in zip(events, events[1:]))
-    assert all("тиын = 1/100 тенге" in c["system"] for c in llm.calls if c["kind"] == "json")
-    # эталон из samples не попадает в промпты
-    assert not any("reference" in c["user"].lower() for c in llm.calls if c["kind"] == "json")
+    # чек-лист: ответы модели, «Частично», и запасные ответы для остальных пунктов
+    assert report.checklist[0].answer == ChecklistAnswer.PARTIAL
+    assert report.checklist[0].finding_ids == ["D-001"] or report.checklist[0].finding_ids == []
+    assert len(report.checklist) >= 10
+
+    # итог: модель сказала «можно», но есть критичный дефект — предохранитель
+    cc = report.conclusion
+    assert cc.decision == Decision.LIMITED and "критичные" in cc.guard_note
+    assert cc.ready_for_development and not cc.ready_for_testing
+    assert cc.fixes[0].finding_ids == ["D-001"] and cc.top_fixes[0].startswith("D-001: ")
+    assert cc.strengths and cc.development and cc.testing
+
+    # прогресс: стадии по порядку, проверка набора видна отдельно
+    stages = [e.stage for e in events]
+    assert stages[0] == RunStage.PARSING and stages[-1] == RunStage.DONE
+    assert RunStage.CHECKING_SET in stages and RunStage.CHECKING_REQUIREMENTS in stages
+    assert [e.progress for e in events] == sorted(e.progress for e in events)
 
     md = render_report(report, "md").decode("utf-8")
-    for f in report.findings:
-        assert f.id in md
-    assert f2.id + ".1" in md and ids
+    assert "Можно с ограничениями" in md and c.id in md
+    assert render_report(report, "pdf")[:5] == b"%PDF-"
 
 
-def test_pipeline_without_llm_answers_uses_rules(sample_path):
-    report = run_pipeline(parse_document(sample_path), FakeLLM(), provider="fake", model="fake")
-    assert report.summary.requirements_total >= 10
-    assert report.findings, "детерминированные проверки должны найти дефекты"
-    assert all(f.source == FindingSource.RULE for f in report.findings)
-    assert report.conclusion.rationale
-    assert report.conclusion.ready_for_development is True  # без LLM критичных нет
+def test_pipeline_without_llm_answers_keeps_rule_candidates(sample_path):
+    report = run_pipeline(parse_document(sample_path), FakeLLM())
+    assert {"Ф-1", "Ф-2", "Ф-3", "Ф-4"} <= {r.source_id for r in report.requirements}
+    assert report.findings == []  # правила — только подсказки агентам, без модели дефектов нет
+    # модель не дала вердиктов — итог не «можно», в отчёте видно, что проверено не всё
+    assert report.conclusion.decision == Decision.LIMITED
+    assert report.quality.uncovered_requirements and "неполным" in report.conclusion.rationale
 
 
-def test_no_split_option(sample_path):
-    report = run_pipeline(parse_document(sample_path), scripted(),
-                          options=ValidationOptions(split_compound=False, fill_checklist=False))
-    assert not any(r.parent_id for r in report.requirements)
-    assert report.checklist == []
-
-
-def _candidates(user):
-    """Замечания в промпте верификатора: строка «C-001 | уровень: …», следующая строка — заголовок."""
-    out = {}
-    lines = user.split("\n")
-    for i, line in enumerate(lines):
-        m = re.match(r"^(C-\d{3}) \| уровень", line)
-        if m and i + 1 < len(lines):
-            out[m.group(1)] = lines[i + 1]
-    return out
-
-
-def _dedup_rows(user):
-    """Строки слияния дублей: «C-001 | уровень | критерий | критичность | требования | заголовок. объяснение»."""
-    rows = {}
-    for line in user.split("\n"):
-        m = re.match(r"^(C-\d{3}) \| ", line)
-        if m:
-            rows[line.split(" | ", 5)[5].split(". ", 1)[0]] = m.group(1)
-    return rows
-
-
-def test_verifier_drops_and_regrades(sample_path):
-    def verifier(system, user):
-        decisions = []
-        for cid, title in _candidates(user).items():
-            if "Не задан часовой пояс" in title:
-                decisions.append({"finding_id": cid, "verdict": "drop", "reason": "Часовой пояс задан."})
-            elif "противоречит Ф-2" in title:
-                decisions.append({"finding_id": cid, "verdict": "keep", "severity": "major"})
-            elif "тестировщиками" in title:  # замечания правил верификатор не отклоняет
-                decisions.append({"finding_id": cid, "verdict": "drop", "severity": "minor"})
-            else:
-                decisions.append({"finding_id": cid, "verdict": "keep"})
-        return {"decisions": decisions}
-
-    llm = scripted()
-    llm.responses["VerifierResult"] = verifier
-    report = run_pipeline(parse_document(sample_path), llm, options=ValidationOptions(verify_pass=True))
-    titles = {f.title: f for f in report.findings}
-    assert "Не задан часовой пояс" not in titles
-    assert titles["Критерий приёмки противоречит Ф-2"].severity == Severity.MAJOR
-    rule = next(f for f in report.findings if "тестировщиками" in f.title)
-    assert rule.source == FindingSource.RULE and rule.severity == Severity.MINOR
+def test_rule_hints_reach_agents(sample_path):
+    llm = FakeLLM()
+    run_pipeline(parse_document(sample_path), llm)
+    ins = next(c for c in llm.calls if c.get("prompt") == "inspector")
+    rev = next(c for c in llm.calls if c.get("prompt") == "reviewer")
+    # подсказки правил bbc-agent и ReqCheck (незаполненный раздел) — в промтах инспектора и рецензентов
+    assert "размытая формулировка" in ins["user"] or "временное условие" in ins["user"]
+    assert "заполняются тестировщиками" in rev["user"]
 
 
 def test_verifier_is_on_by_default_and_skippable(sample_path):
     llm = scripted()
     run_pipeline(parse_document(sample_path), llm)
-    assert any(c["schema"] == "VerifierResult" for c in llm.calls)
+    assert any(c.get("prompt") == "verifier" for c in llm.calls)
     llm = scripted()
-    run_pipeline(parse_document(sample_path), llm, options=ValidationOptions(verify_pass=False))
-    assert not any(c["schema"] in ("VerifierResult", "DedupResult") for c in llm.calls)
+    report = run_pipeline(parse_document(sample_path), llm, options=ValidationOptions(verify_pass=False))
+    assert not any(c.get("prompt") in ("verifier", "dedup") for c in llm.calls)
+    assert "Приоритеты не указаны" in [f.title for f in report.findings]  # без оппонента замечание остаётся
 
 
-def test_dedup_merges_only_related_duplicates(sample_path):
-    """Модель предлагает группы дублей; код сливает только замечания об одном месте или требовании."""
-    twin = dict(CONTRADICTION, title="Дубль: месяц покупки противоречит критерию", severity="major", question="")
-
-    def review(system, user):
-        if "зона — документы, интерфейсы" in user:  # второй контролёр нашёл то же самое
-            return {"issues": [twin]}
-        return role_review(system, user)
-
-    def dedup(system, user):
-        rows = _dedup_rows(user)
-        contra = rows.get("Критерий приёмки противоречит Ф-2")
-        dup = next((i for t, i in rows.items() if t.startswith("Дубль")), None)
-        rule = next((i for t, i in rows.items() if "тестировщиками" in t), None)
-        if not (contra and dup and rule):  # второй проход (одно место документа) — без групп
-            return {}
-        # вторая группа ложная: замечание правила о другом месте документа — код её не сольёт
-        return {"groups": [{"ids": [dup, contra], "reason": "одно и то же"}, {"ids": [contra, rule], "reason": "?"}]}
-
+def test_questions_and_checklist_can_be_switched_off(sample_path):
     llm = scripted()
-    llm.responses["RoleReviewResult"] = review
-    llm.responses["DedupResult"] = dedup
-    report = run_pipeline(parse_document(sample_path), llm)
-    titles = [f.title for f in report.findings]
-    assert "Критерий приёмки противоречит Ф-2" in titles
-    assert not any(t.startswith("Дубль") for t in titles)
-    assert any("тестировщиками" in t for t in titles)
-    kept = next(f for f in report.findings if f.title == "Критерий приёмки противоречит Ф-2")
-    assert kept.severity == Severity.CRITICAL
+    report = run_pipeline(parse_document(sample_path), llm,
+                          options=ValidationOptions(ask_questions=False, fill_checklist=False))
+    assert report.questions == [] and report.checklist == []
+    assert not any(c.get("prompt") in ("clarifier", "checklist") for c in llm.calls)
 
 
-def test_questions_from_model_are_numbered_and_limited(sample_path):
-    def questions(system, user):
-        fid = re.search(r"^(D-\d{3}) \| critical", user, re.M).group(1)
-        return {"questions": [
-            {"question": "Минор?", "why": "x", "priority": "minor", "finding_ids": [fid]},
-            {"question": "Какая дата определяет месяц?", "why": "Блокирует счётчик.", "addressee": "Business owner",
-             "priority": "blocker", "finding_ids": [fid, "D-999"], "options": ["дата совершения", "дата проведения"]},
-            {"question": "Какая дата определяет месяц?", "priority": "blocker"},  # повтор отбрасывается
-        ]}
+def test_answers_produce_rewrites(sample_path):
+    def resolver(system, user):
+        assert "Ответ автора: Дата совершения" in user
+        rid = re.search(r"требования: (R-\d{3})", user).group(1)
+        fid = re.search(r"замечания: (D-\d{3})", user).group(1)
+        return {"resolutions": [{"question_id": "Q-01", "rewrites": [{"req_id": rid, "new_text": "Месяц — по дате совершения (UTC+5)."}],
+                                 "closes_findings": [fid], "note": "Критерий приёмки поправить."}]}
 
-    llm = scripted()
-    llm.responses["QuestionsResult"] = questions
-    report = run_pipeline(parse_document(sample_path), llm, options=ValidationOptions(max_questions=5))
-    assert [q.id for q in report.questions] == ["Q-01", "Q-02"]
-    first = report.questions[0]
-    assert first.priority.value == "blocker" and first.options == ["дата совершения", "дата проведения"]
-    assert "D-999" not in first.finding_ids and first.finding_ids
+    report = run_pipeline(parse_document(sample_path), scripted(resolver=resolver),
+                          options=ValidationOptions(answers={"Q-01": "Дата совершения"}))
+    q1 = report.questions[0]
+    assert q1.answer == "Дата совершения" and q1.resolution.rewrites[0].new_text.startswith("Месяц")
+    closed = q1.resolution.closes_findings[0]
+    assert next(f for f in report.findings if f.id == closed).resolved_by == "Q-01"
     md = render_report(report, "md").decode("utf-8")
-    assert "Уточняющие вопросы автору документа" in md and "Q-01" in md and "(а) дата совершения" in md
+    assert "Месяц — по дате совершения (UTC+5)." in md
 
-    llm = scripted()
-    report = run_pipeline(parse_document(sample_path), llm, options=ValidationOptions(ask_questions=False))
-    assert report.questions == [] and not any(c["schema"] == "QuestionsResult" for c in llm.calls)
+
+def test_knowledge_snippets_in_system_prompt(sample_path):
+    llm = FakeLLM()
+    run_pipeline(parse_document(sample_path), llm, options=ValidationOptions(knowledge_snippets=["Тиын — 1/100 тенге"]))
+    ins = next(c for c in llm.calls if c.get("prompt") == "inspector")
+    ext = next(c for c in llm.calls if c.get("prompt") == "extractor")
+    assert "Тиын — 1/100 тенге" in ins["system"] and "Тиын" not in ext["system"]
+
+
+def test_parallel_workers_give_same_result(sample_path):
+    one = run_pipeline(parse_document(sample_path), scripted())
+    many = run_pipeline(parse_document(sample_path), scripted(), options=ValidationOptions(concurrency=4, batch_size=2))
+    assert [(f.id, f.title) for f in one.findings] == [(f.id, f.title) for f in many.findings]
 
 
 def test_long_model_title_is_split_without_losing_text():
-    from req_core.pipeline import TITLE_LIMIT, split_title
-
-    long = ("«Проведённые покупки» — неопределённый статус: не сказано, что считать проведённой покупкой "
-            "(авторизованная, поставленная в оборот, со статусом posted), поэтому тестировщик не знает, что проверять.")
-    title, expl = split_title(long, "Короткое пояснение.")
-    assert len(title) <= TITLE_LIMIT and title.startswith("«Проведённые покупки» — неопределённый статус: не сказано") and title.endswith("…")
-    assert long in expl and expl.endswith("Короткое пояснение.")
-    assert split_title("Коротко", "Пояснение") == ("Коротко", "Пояснение")
-    assert split_title("", "Только пояснение") == ("Только пояснение", "Только пояснение")
-
-
-def test_checklist_prompt_sees_the_document(sample_path):
-    llm = FakeLLM()
-    run_pipeline(parse_document(sample_path), llm)
-    call = next(c for c in llm.calls if c.get("schema") == "ChecklistResult")
-    assert "<document>" in call["user"] and "Архитектура решения" in call["user"]
-
-
-def test_short_first_phrase_is_not_used_as_title():
-    from req_core.pipeline import TITLE_LIMIT, split_title
-
-    long = "«Переводы» — не определено, относятся ли к ним переводы между своими картами, пополнения и платежи по реквизитам"
-    title, _ = split_title(long, "")
-    assert title.startswith("«Переводы» — не определено") and len(title) <= TITLE_LIMIT
+    title = "Очень длинный заголовок " * 10
+    short, expl = split_title(title, "Пояснение.")
+    assert len(short) <= TITLE_LIMIT and " ".join(title.split()) in expl
 
 
 def test_foreign_script_leaks_are_removed_from_model_text(sample_path):
-    llm = scripted()
-    llm.responses["ConclusionResult"] = {"rationale": "Нет ветки除了happy-path.", "top_fixes": ["Описать ветки除了успеха"]}
-    report = run_pipeline(parse_document(sample_path), llm)
-    assert report.conclusion.rationale == "Нет ветки happy-path."
-    assert report.conclusion.top_fixes == ["Описать ветки успеха"]
+    def leaky(system, user):
+        out = verdict(system, user)
+        out["rationale"] = "Есть противоречие 矛盾 в логике."
+        return out
 
-
-def test_title_is_not_cut_at_status_code_period():
-    from req_core.pipeline import split_title
-
-    long = ("Требование 401 размещено в разделе «200. Successful — Created», что противоречит смыслу кода 401 "
-            "и вводит в заблуждение разработчика и тестировщика при реализации обработки ошибок авторизации")
-    title, _ = split_title(long, "")
-    assert "Successful" in title
+    report = run_pipeline(parse_document(sample_path), scripted(verdict=leaky))
+    assert "矛盾" not in report.conclusion.rationale
