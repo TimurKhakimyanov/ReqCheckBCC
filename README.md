@@ -81,8 +81,10 @@ docker compose --profile test run --rm --build test-infra   # смоук-тес�
 git pull
 docker compose --profile backup run --rm backup     # бэкап перед обновлением
 docker compose up -d --build                         # пересборка; migrate применит миграции Alembic
-docker image prune -f                                # убрать старые слои
 ```
+
+Старые образы не удаляются автоматически. Не запускайте `docker image prune` или `docker system prune` на сервере, где работают
+чужие контейнеры: эти команды затрагивают весь Docker. Удаляйте только образы ReqCheck по имени.
 
 Сервис `migrate` выполняет `alembic upgrade head` при каждом `up` и запускает `api`/`worker` только после
 успешной миграции. Версии образов инфраструктуры закреплены в `compose.yaml`; при смене **мажорной** версии
@@ -155,7 +157,7 @@ docker compose up -d
 docker compose ps                         # состояние и healthcheck
 docker compose logs -f api worker         # логи
 docker compose down                       # остановить (данные в томах сохраняются)
-docker compose down -v                    # остановить и УДАЛИТЬ все данные
+docker compose down -v                    # остановить и УДАЛИТЬ все данные ReqCheck (только тома этого проекта)
 ```
 
 <!-- ===================== Раздел сессии «Бэкенд» ===================== -->

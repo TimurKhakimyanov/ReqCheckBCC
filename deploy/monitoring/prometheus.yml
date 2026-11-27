@@ -45,10 +45,12 @@ scrape_configs:
     scrape_interval: 30s
     static_configs: [{ targets: ["cadvisor:8080"] }]
     metric_relabel_configs:
-      # Оставляем только контейнеры с compose-метками (без системных cgroup).
-      - source_labels: [container_label_com_docker_compose_service]
-        regex: ""
-        action: drop
+      # Только контейнеры compose-проектов ReqCheck (имя проекта начинается с reqcheck):
+      # чужие контейнеры на хосте и системные cgroup в Prometheus не попадают.
+      # Если запускаете стек с другим `-p`/COMPOSE_PROJECT_NAME — поправьте regex.
+      - source_labels: [container_label_com_docker_compose_project]
+        regex: "reqcheck.*"
+        action: keep
 
   # --- Сам мониторинг ---
   - job_name: prometheus

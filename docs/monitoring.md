@@ -26,6 +26,11 @@ postgres-exporter, redis-exporter, cAdvisor (ресурсы контейнеро
 | `cadvisor` | `cadvisor:8080` | ресурсы контейнеров |
 | `prometheus`, `loki`, `alloy`, `grafana` | — | сам мониторинг |
 
+На хосте могут работать чужие контейнеры, поэтому в мониторинг попадают только контейнеры проектов ReqCheck.
+Alloy берёт логи по метке `com.docker.compose.project` = имя текущего проекта. Prometheus оставляет
+метрики cAdvisor только для проектов, чьё имя начинается с `reqcheck` (`metric_relabel_configs` в `prometheus.yml`).
+Alloy и cAdvisor подключают `docker.sock` и `/var/lib/docker` только на чтение.
+
 Пока сервис приложения не отдаёт `/metrics`, его цель в Prometheus будет `down` — дашборд при этом работает,
 панели приложения просто пустые.
 
