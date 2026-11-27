@@ -20,13 +20,23 @@ FastAPI публикует полный OpenAPI на `/api/openapi.json` — о�
 ## Провайдеры LLM (кабинет)
 | Метод | Путь | Тело / ответ |
 | :--- | :--- | :--- |
-| GET | `/providers` | → `[{provider, enabled, has_key, key_hint: "…a1b2", base_url, default_model, updated_at}]` для `gemini, openai, anthropic, openai_compatible` |
-| PUT | `/providers/{provider}` | `{api_key?, base_url?, enabled?, default_model?}` → объект провайдера. `api_key: ""` — удалить ключ |
-| POST | `/providers/{provider}/test` | необязательное тело `{api_key?, base_url?}` — несохранённые значения из формы поверх сохранённых (не записываются) → `{ok, latency_ms, error?, models: [string]}`: живой список моделей и короткий запрос к модели (по умолчанию — `default_model`, иначе первая из списка) |
+| GET | `/providers` | → `[{provider, enabled, has_key, key_hint: "…a1b2", base_url, default_model, extra_body, extra_body_set_review, max_output_tokens, updated_at}]` для `gemini, openai, anthropic, openai_compatible` |
+| PUT | `/providers/{provider}` | `{api_key?, base_url?, enabled?, default_model?, extra_body?, extra_body_set_review?, max_output_tokens?}` → объект провайдера. `api_key: ""` — удалить ключ; `null` в `extra_body*`/`max_output_tokens` — сбросить |
+| POST | `/providers/{provider}/test` | необязательное тело `{api_key?, base_url?, extra_body?}` — несохранённые значения из формы поверх сохранённых (не записываются) → `{ok, latency_ms, error?, models: [string]}`: живой список моделей и короткий запрос к модели (по умолчанию — `default_model`, иначе первая из списка) |
 | GET | `/providers/{provider}/models` | → `{models: [string], error?}` — живой список через ядро с сохранёнными ключом и адресом; при ошибке — подсказки и текст `error` |
 
 Ключ никогда не возвращается целиком. `openai_compatible` (vLLM, Ollama, LM Studio) считается настроенным, если задан
 `base_url` (например `http://vllm.example.local:8000/v1`); ключ необязателен. Адреса по умолчанию нет.
+
+Доп. параметры запроса к модели (передаются ядру в `ProviderConfig`, в том числе в `test`):
+- `extra_body` — JSON-объект, добавляемый в тело запроса OpenAI-совместимого сервера. Например, для vLLM-модели с
+  рассуждениями: `{"chat_template_kwargs": {"enable_thinking": false}}` — без него проверка ключа и прогон идут минутами.
+- `extra_body_set_review` — то же для проверки набора требований (поиск противоречий), например
+  `{"chat_template_kwargs": {"enable_thinking": true}}`; `null` — как `extra_body`.
+- `max_output_tokens` — лимит ответа; `null` — ядро выбирает с запасом.
+
+`extra_body*` принимаются как объект или строка с JSON-объектом; иначе `422`. Параллельность запросов — глобальная
+настройка `concurrency` в `/settings`.
 
 ## Настройки приложения (кабинет)
 Всё про ИИ задаётся здесь, а не в `.env`: api и worker не читают из окружения ключи, модели и параметры LLM/эмбеддингов.

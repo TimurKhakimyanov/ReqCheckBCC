@@ -13,6 +13,8 @@
 | `openai_compatible` | Настроен, если задан `base_url`; ключ необязателен. Адреса по умолчанию больше нет (`base_url: null`, пока админ не задаст). В форме ключ для этого провайдера — необязательное поле. |
 | `POST /runs` | Без `provider`/`model` — из `/settings` (`default_provider`, `default_model`); если провайдер не настроен — первый настроенный. `batch_size`/`concurrency` берутся из настроек, если не заданы в `options`; итоговые значения видны в `Run.options`. |
 | `GET /health` → `limits.max_upload_mb` | Теперь из настроек (меняется без перезапуска). |
+| `Provider` (`GET/PUT /providers`) | Новые поля `extra_body`, `extra_body_set_review` (JSON-объект или `null`; принимается и строка с JSON-объектом, иначе `422`) и `max_output_tokens` (целое ≥ 1 или `null`). В `PUT` передавайте только изменённые поля; `null` — сброс. Удобно показать их в разделе «Дополнительно» формы провайдера; для `openai_compatible` с моделью-«рассуждателем» пример: `extra_body = {"chat_template_kwargs": {"enable_thinking": false}}`, `extra_body_set_review = {"chat_template_kwargs": {"enable_thinking": true}}`. |
+| `POST /providers/{p}/test` (тело) | Можно передать и несохранённый `extra_body` (`null` — проверить без него). Без этого поля используется сохранённый — проверка vLLM-модели без отключения рассуждений идёт минутами. |
 | Смена эмбеддингов | После `PUT /settings` с другим провайдером/моделью эмбеддингов база знаний и поиск переиндексируются в фоне; элементы базы знаний на это время в `status: indexing`, при ошибке ключа — `failed` с текстом. |
 
 ## HTTP API (для сессии «Веб»)
@@ -69,7 +71,7 @@
 - `render_report(report, "md"|"docx"|"pdf")` вызывается воркером; падение одного формата не валит прогон.
 - API вызывает `answer_question` (чат), `get_llm(cfg).complete(system, user)` (кнопка «Проверить ключ»),
   `list_models(cfg)`, `parse_document` (загрузка PDF/DOCX в базу знаний).
-- `ProviderConfig.base_url` для `openai_compatible` задаётся в админке; ключ может быть `None`. `min_interval_s` и `max_attempts` воркер берёт из `/settings` — ядру в режиме api/worker не нужно читать `LLM_MIN_INTERVAL_S`, `LLM_MAX_ATTEMPTS`, `REQCHECK_BATCH_SIZE`, `OPENAI_COMPATIBLE_*` и `*_API_KEY` из окружения (в контейнерах api/worker их больше нет).
+- `ProviderConfig.base_url` для `openai_compatible` задаётся в админке; ключ может быть `None`. `extra_body`, `extra_body_set_review` и `max_output_tokens` — из настроек провайдера; `min_interval_s` и `max_attempts` воркер берёт из `/settings` — ядру в режиме api/worker не нужно читать `LLM_MIN_INTERVAL_S`, `LLM_MAX_ATTEMPTS`, `REQCHECK_BATCH_SIZE`, `OPENAI_COMPATIBLE_*` и `*_API_KEY` из окружения (в контейнерах api/worker их больше нет).
 
 ## Для main / «Инфраструктуры» (`compose.yaml`, общий якорь `x-app-env`)
 - api/worker больше не читают `DEFAULT_LLM_PROVIDER`, `DEFAULT_LLM_MODEL`, `OPENAI_COMPATIBLE_BASE_URL` — их можно убрать
