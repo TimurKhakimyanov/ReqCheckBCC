@@ -22,9 +22,6 @@ x-app-env: &app-env
   EMBEDDER_URL: http://embedder:8001
   APP_SECRET_KEY: ${APP_SECRET_KEY}
   APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
-  DEFAULT_LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
-  DEFAULT_LLM_MODEL: ${LLM_MODEL:-}
-  OPENAI_COMPATIBLE_BASE_URL: ${OPENAI_COMPATIBLE_BASE_URL:-http://ollama:11434/v1}
 
 services:
   # ===================== Веб (сессия «Веб») =====================

@@ -56,6 +56,7 @@ class ProviderSetting(Base):
     extra_body: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     extra_body_set_review: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timeout_s: Mapped[int | None] = mapped_column(Integer, nullable=True)  # таймаут одного запроса к модели
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 

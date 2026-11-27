@@ -63,6 +63,7 @@ class ProviderOut(BaseModel):
     extra_body: dict[str, Any] | None = None
     extra_body_set_review: dict[str, Any] | None = None
     max_output_tokens: int | None = None
+    timeout_s: int | None = None
     updated_at: datetime | None
 
 
@@ -93,6 +94,8 @@ class ProviderUpdate(BaseModel):
     extra_body_set_review: JsonObject | None = Field(
         default=None, description="extra_body для проверки набора требований (None — как extra_body)")
     max_output_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
+    timeout_s: int | None = Field(default=None, ge=10, le=3600,
+                                  description="Таймаут одного запроса к модели, с (null — 180 с по умолчанию ядра)")
 
 
 class ProviderTestIn(BaseModel):

@@ -29,7 +29,7 @@ def provider_out(row: ProviderSetting) -> ProviderOut:
     return ProviderOut(provider=ProviderName(row.provider), enabled=row.enabled, has_key=bool(row.api_key_encrypted),
                        key_hint=row.key_hint, base_url=row.base_url, default_model=row.default_model,
                        extra_body=row.extra_body, extra_body_set_review=row.extra_body_set_review,
-                       max_output_tokens=row.max_output_tokens, updated_at=row.updated_at)
+                       max_output_tokens=row.max_output_tokens, timeout_s=row.timeout_s, updated_at=row.updated_at)
 
 
 @router.get("", response_model=list[ProviderOut])
@@ -56,7 +56,7 @@ def update_provider(provider: ProviderName, body: ProviderUpdate, request: Reque
     if body.default_model is not None:
         row.default_model = body.default_model.strip() or None
         changed.append("default_model")
-    for field in ("extra_body", "extra_body_set_review", "max_output_tokens"):
+    for field in ("extra_body", "extra_body_set_review", "max_output_tokens", "timeout_s"):
         if field in body.model_fields_set:  # null — сбросить
             setattr(row, field, getattr(body, field))
             changed.append(field)
@@ -99,7 +99,7 @@ async def test_provider(provider: ProviderName, _: CurrentUser, db: DB,
     except ProviderNotConfigured as e:
         return ProviderTestOut(ok=False, latency_ms=0, error=str(e))
     # Проверка должна быть быстрой: без повторов и пауз; лимит токенов выбирает ядро (модели с рассуждениями).
-    cfg = cfg.model_copy(update={"timeout_s": 30.0, "max_attempts": 1, "min_interval_s": 0.0})
+    cfg = cfg.model_copy(update={"max_attempts": 1, "min_interval_s": 0.0})
     start = time.perf_counter()
     models, list_error = await _live_models(cfg)
     model = cfg.model or (models[0] if models else "")
@@ -108,7 +108,8 @@ async def test_provider(provider: ProviderName, _: CurrentUser, db: DB,
                                error=list_error or "Не выбрана модель для проверки")
     try:
         client = req_core.get_llm(cfg.model_copy(update={"model": model}))
-        await asyncio.wait_for(run_in_threadpool(client.complete, "Answer with one word.", "ping"), timeout=45)
+        await asyncio.wait_for(run_in_threadpool(client.complete, "Answer with one word.", "ping"),
+                               timeout=cfg.timeout_s + 15)
     except Exception as e:  # noqa: BLE001
         return ProviderTestOut(ok=False, latency_ms=_ms(start), models=models, error=_error_text(e))
     return ProviderTestOut(ok=True, latency_ms=_ms(start), models=models)

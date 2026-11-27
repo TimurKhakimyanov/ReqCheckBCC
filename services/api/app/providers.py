@@ -144,6 +144,7 @@ def build_provider_config(db: Session, provider: str, model: str | None = None, 
         min_interval_s=settings.min_interval_s,
         max_attempts=settings.max_attempts,
         max_output_tokens=row.max_output_tokens,
+        **({"timeout_s": float(row.timeout_s)} if row.timeout_s else {}),
         extra_body=overrides.extra_body if overrides and overrides.extra_body_set else row.extra_body,
         extra_body_set_review=row.extra_body_set_review,
     )

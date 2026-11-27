@@ -254,6 +254,8 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
             RUNS_FINISHED.labels("failed", provider).inc()
             return "failed"
 
+    # Общий таймаут прогона не короче одного запроса к модели с запасом (иначе медленная модель не успеет ни разу)
+    run_timeout = max(settings.run_timeout_s, int(cfg.timeout_s * 1.2))
     RUNS_IN_PROGRESS.inc()
     status = RunStage.FAILED
     try:
@@ -268,7 +270,7 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
             report = run_with_watchdog(
                 lambda: req_core.validate_document(path, cfg, options=options, on_progress=progress.on_core_progress,
                                                    document_name=doc_name),
-                progress, settings.run_timeout_s,
+                progress, run_timeout,
             )
         if progress.cancelled():
             raise RunCancelled("run cancelled")
@@ -315,7 +317,7 @@ def execute_run(run_id: str, svc: Services | None = None) -> str:
         return status.value
     except Exception as e:  # noqa: BLE001
         status = RunStage.FAILED
-        error = describe_error(e, settings.run_timeout_s)
+        error = describe_error(e, run_timeout)
         lg.error("run failed", extra={"error": error}, exc_info=not isinstance(e, (RunTimedOut, NotImplementedError)))
         if _finish(rid, RunStage.FAILED, error=error, message=error):
             progress.emit(RunStage.FAILED, 0.0, error)

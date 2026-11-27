@@ -147,6 +147,12 @@ async def test_openai_compatible_without_key(client):
     cfg = testing.CORE_CALLS["complete"]
     assert r.json()["ok"] and cfg.extra_body == no_think and cfg.extra_body_set_review == think
     assert cfg.max_output_tokens == 48000
+    # таймаут одного запроса — по провайдеру, в т. ч. для проверки ключа
+    r = await client.put("/api/providers/openai_compatible", json={"timeout_s": 900})
+    assert r.json()["timeout_s"] == 900
+    assert (await client.put("/api/providers/openai_compatible", json={"timeout_s": 5})).status_code == 422
+    await client.post("/api/providers/openai_compatible/test")
+    assert testing.CORE_CALLS["complete"].timeout_s == 900
     await client.post("/api/providers/openai_compatible/test", json={"extra_body": None})
     assert testing.CORE_CALLS["complete"].extra_body is None  # несохранённое значение из формы
     r = await client.get("/api/providers/openai_compatible/models")

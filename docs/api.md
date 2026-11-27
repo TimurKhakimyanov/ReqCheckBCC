@@ -20,8 +20,8 @@ FastAPI публикует полный OpenAPI на `/api/openapi.json` — о�
 ## Провайдеры LLM (кабинет)
 | Метод | Путь | Тело / ответ |
 | :--- | :--- | :--- |
-| GET | `/providers` | → `[{provider, enabled, has_key, key_hint: "…a1b2", base_url, default_model, extra_body, extra_body_set_review, max_output_tokens, updated_at}]` для `gemini, openai, anthropic, openai_compatible` |
-| PUT | `/providers/{provider}` | `{api_key?, base_url?, enabled?, default_model?, extra_body?, extra_body_set_review?, max_output_tokens?}` → объект провайдера. `api_key: ""` — удалить ключ; `null` в `extra_body*`/`max_output_tokens` — сбросить |
+| GET | `/providers` | → `[{provider, enabled, has_key, key_hint: "…a1b2", base_url, default_model, extra_body, extra_body_set_review, max_output_tokens, timeout_s, updated_at}]` для `gemini, openai, anthropic, openai_compatible` |
+| PUT | `/providers/{provider}` | `{api_key?, base_url?, enabled?, default_model?, extra_body?, extra_body_set_review?, max_output_tokens?, timeout_s?}` → объект провайдера. `api_key: ""` — удалить ключ; `null` в `extra_body*`/`max_output_tokens`/`timeout_s` — сбросить |
 | POST | `/providers/{provider}/test` | необязательное тело `{api_key?, base_url?, extra_body?}` — несохранённые значения из формы поверх сохранённых (не записываются) → `{ok, latency_ms, error?, models: [string]}`: живой список моделей и короткий запрос к модели (по умолчанию — `default_model`, иначе первая из списка) |
 | GET | `/providers/{provider}/models` | → `{models: [string], error?}` — живой список через ядро с сохранёнными ключом и адресом; при ошибке — подсказки и текст `error` |
 
@@ -34,6 +34,9 @@ FastAPI публикует полный OpenAPI на `/api/openapi.json` — о�
 - `extra_body_set_review` — то же для проверки набора требований (поиск противоречий), например
   `{"chat_template_kwargs": {"enable_thinking": true}}`; `null` — как `extra_body`.
 - `max_output_tokens` — лимит ответа; `null` — ядро выбирает с запасом.
+- `timeout_s` — таймаут одного запроса к модели, с (10…3600; `null` — 180 с). Модели с рассуждениями на проверке набора
+  отвечают 3–5 минут — ставьте 900. Используется и в `test`. Общий таймаут прогона (`run_timeout_s` в `/settings`)
+  воркер автоматически увеличивает до `1.2 × timeout_s`, если он короче.
 
 `extra_body*` принимаются как объект или строка с JSON-объектом; иначе `422`. Параллельность запросов — глобальная
 настройка `concurrency` в `/settings`.

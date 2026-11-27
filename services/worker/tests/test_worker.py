@@ -192,6 +192,9 @@ def test_timeout(svc, monkeypatch):
 
     # в админке минимум 60 с; для теста подменяем прочитанные настройки без валидации
     monkeypatch.setattr(tasks, "read_app_settings", lambda: AppSettings.model_construct(run_timeout_s=1))
+    build = tasks.build_provider_config  # общий таймаут не короче одного запроса к модели — его тоже укорачиваем
+    monkeypatch.setattr(tasks, "build_provider_config",
+                        lambda *a, **k: build(*a, **k).model_copy(update={"timeout_s": 1.0}))
     run_id = make_run(svc)
     assert run_validation.delay(run_id).get() == "failed"
     assert "Превышено время прогона" in get_run(run_id).error
@@ -281,4 +284,33 @@ def test_provider_request_options_reach_core(svc, monkeypatch):
         with SessionLocal() as db:
             row = db.get(ProviderSetting, "gemini")
             row.extra_body = row.extra_body_set_review = row.max_output_tokens = None
+            db.commit()
+
+
+def test_provider_timeout_reaches_core_and_extends_run_deadline(svc, monkeypatch):
+    """timeout_s провайдера → ProviderConfig; общий таймаут прогона не короче одного запроса (×1.2)."""
+    import worker.tasks as tasks
+
+    with SessionLocal() as db:
+        db.get(ProviderSetting, "gemini").timeout_s = 900
+        db.commit()
+    seen = {}
+    monkeypatch.setattr(tasks, "read_app_settings", lambda: AppSettings.model_construct(run_timeout_s=60))
+
+    def fake_watchdog(fn, progress, timeout_s):
+        seen["deadline"] = timeout_s
+        return fn()
+
+    def capture(path, llm, *, options=None, on_progress=None, document_name=None):
+        seen["timeout"] = llm.timeout_s
+        return SAMPLE
+
+    monkeypatch.setattr(tasks, "run_with_watchdog", fake_watchdog)
+    monkeypatch.setattr(req_core, "validate_document", capture)
+    try:
+        assert run_validation.delay(make_run(svc)).get() == "done"
+        assert seen == {"timeout": 900.0, "deadline": 1080}
+    finally:
+        with SessionLocal() as db:
+            db.get(ProviderSetting, "gemini").timeout_s = None
             db.commit()
