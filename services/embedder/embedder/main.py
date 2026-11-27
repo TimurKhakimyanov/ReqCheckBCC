@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -15,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pydantic import BaseModel, Field
 
-from .backends import Backend, build_backend
+from .backends import Backend, ConfigError, build_local, remote_backend
 
 log = logging.getLogger("embedder")
 TEXTS = Counter("reqcheck_embedder_texts_total", "Texts embedded", ["kind"])
@@ -55,6 +56,11 @@ def _setup_logging() -> None:
 class EmbedIn(BaseModel):
     texts: list[str] = Field(min_length=1, max_length=MAX_TEXTS)
     kind: Literal["query", "passage"] = "passage"
+    # Внешний провайдер задаётся в админке; api передаёт его вместе с ключом в каждом запросе.
+    provider: Literal["local", "gemini", "openai"] = "local"
+    model: str | None = None
+    api_key: str | None = Field(default=None, repr=False)
+    dim: int | None = Field(default=None, ge=16, le=4096, description="Только gemini: outputDimensionality")
 
 
 class EmbedOut(BaseModel):
@@ -70,13 +76,13 @@ class InfoOut(BaseModel):
     normalized: bool = True
 
 
-def create_app(backend: Backend | None = None) -> FastAPI:
+def create_app(backend: Backend | None = None, local_factory: Callable[[], Backend] = build_local) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         _setup_logging()
         if app.state.backend is None:
             start = time.perf_counter()
-            app.state.backend = build_backend()
+            app.state.backend = local_factory()
             b = app.state.backend
             log.info("embedder ready", extra={"provider": b.provider, "model": b.model, "dim": b.dim,
                                               "duration_ms": round((time.perf_counter() - start) * 1000)})
@@ -87,7 +93,11 @@ def create_app(backend: Backend | None = None) -> FastAPI:
 
     @app.post("/embed", response_model=EmbedOut)
     def embed(body: EmbedIn) -> EmbedOut:
-        b: Backend = app.state.backend
+        try:
+            b: Backend = app.state.backend if body.provider == "local" else remote_backend(
+                body.provider, body.model, body.api_key, body.dim)
+        except ConfigError as e:
+            raise HTTPException(400, str(e)) from e
         texts = [t[:MAX_CHARS] if t.strip() else " " for t in body.texts]
         start = time.perf_counter()
         try:
@@ -95,7 +105,9 @@ def create_app(backend: Backend | None = None) -> FastAPI:
         except httpx.HTTPError as e:
             ERRORS.inc()
             log.warning("embedding provider error: %s", e)
-            raise HTTPException(502, f"Embedding provider error: {e}") from e
+            status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else None
+            raise HTTPException(502, f"Embedding provider {body.provider} error"
+                                     f"{f' (HTTP {status})' if status else ''}: {type(e).__name__}") from e
         LATENCY.observe(time.perf_counter() - start)
         TEXTS.labels(body.kind).inc(len(texts))
         return EmbedOut(vectors=vectors, model=b.model, dim=len(vectors[0]) if vectors else b.dim)

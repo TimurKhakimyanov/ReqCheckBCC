@@ -58,16 +58,9 @@ services:
       <<: *app-env
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
-      RUN_TIMEOUT_S: ${RUN_TIMEOUT_S:-1800}
-      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      # true, если веб открыт по HTTPS. Всё про ИИ (провайдеры, ключи, модели, таймауты, эмбеддинги),
+      # лимит загрузки и срок сессии задаются в админке (GET/PUT /api/settings), не в .env.
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      # Начальные ключи провайдеров: записываются в кабинет при старте, если там ключа ещё нет.
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_COMPATIBLE_API_KEY: ${OPENAI_COMPATIBLE_API_KEY:-}
-      OPENAI_COMPATIBLE_MODEL: ${OPENAI_COMPATIBLE_MODEL:-}
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -103,8 +96,7 @@ services:
     stop_grace_period: 30s
     environment:
       <<: *app-env
-      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
-      RUN_TIMEOUT_S: ${RUN_TIMEOUT_S:-1800}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}  # прогонов одновременно (нужен перезапуск воркера)
       WORKER_METRICS_PORT: "9101"  # Prometheus: worker:9101/metrics
       PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
     depends_on:
@@ -133,12 +125,7 @@ services:
     restart: unless-stopped
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-local}
-      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-intfloat/multilingual-e5-small}
-      EMBEDDINGS_API_KEY: ${EMBEDDINGS_API_KEY:-}
-      EMBEDDINGS_DIM: ${EMBEDDINGS_DIM:-768}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Провайдер, модель и ключ внешних эмбеддингов приходят от api в каждом запросе (настройки админки).
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/info', timeout=2)"]
       interval: 10s

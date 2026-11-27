@@ -10,6 +10,7 @@ from celery import Celery
 from qdrant_client import QdrantClient
 
 from .config import get_settings
+from .app_settings import MAX_RUN_TIMEOUT_S, embedding_config
 from .embeddings import Embedder, HttpEmbedder
 from .storage import ObjectStore, S3ObjectStore
 from .vectors import VectorStore
@@ -33,8 +34,8 @@ def make_celery(name: str = "reqcheck") -> Celery:
         worker_prefetch_multiplier=1,
         broker_connection_retry_on_startup=True,
         # задача с acks_late не должна переотправляться, пока идёт долгий прогон
-        broker_transport_options={"visibility_timeout": s.run_timeout_s + 900},
-        result_backend_transport_options={"visibility_timeout": s.run_timeout_s + 900},
+        broker_transport_options={"visibility_timeout": MAX_RUN_TIMEOUT_S + 900},
+        result_backend_transport_options={"visibility_timeout": MAX_RUN_TIMEOUT_S + 900},
         timezone="UTC",
     )
     return app
@@ -67,7 +68,7 @@ def build_services() -> Services:
     s = get_settings()
     return Services(
         store=S3ObjectStore(s.s3_endpoint_url, s.s3_access_key, s.s3_secret_key, s.s3_bucket, s.s3_region),
-        embedder=HttpEmbedder(s.embedder_url),
+        embedder=HttpEmbedder(s.embedder_url, config=embedding_config.get),
         qdrant=QdrantClient(url=s.qdrant_url, api_key=s.qdrant_api_key or None, timeout=30, https=False),
         redis=redis.Redis.from_url(s.redis_url, decode_responses=True),
     )

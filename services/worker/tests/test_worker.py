@@ -17,7 +17,7 @@ from app import testing  # noqa: E402
 testing.prepare_test_database("worker_test")
 testing.block_external_network()  # тесты не ходят во внешнюю сеть (LLM-провайдеры и т. п.)
 
-from app.config import get_settings  # noqa: E402
+from app.app_settings import AppSettings, load_row  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
 from app.models import Document, ProviderSetting, ReportRow, Run  # noqa: E402
 from app.providers import set_api_key  # noqa: E402
@@ -188,7 +188,10 @@ def test_timeout(svc, monkeypatch):
         return SAMPLE
 
     monkeypatch.setattr(req_core, "validate_document", hang)
-    monkeypatch.setattr(get_settings(), "run_timeout_s", 1)
+    import worker.tasks as tasks
+
+    # в админке минимум 60 с; для теста подменяем прочитанные настройки без валидации
+    monkeypatch.setattr(tasks, "read_app_settings", lambda: AppSettings.model_construct(run_timeout_s=1))
     run_id = make_run(svc)
     assert run_validation.delay(run_id).get() == "failed"
     assert "Превышено время прогона" in get_run(run_id).error
@@ -233,3 +236,24 @@ def test_metrics_names():
                  "reqcheck_llm_tokens_total"):
         assert name in text, name
     assert 'type="input"' in text and 'status="done"' in text
+
+
+def test_llm_pacing_comes_from_admin_settings(svc, monkeypatch):
+    """min_interval_s и max_attempts — из настроек приложения в БД, а не из окружения."""
+    with SessionLocal() as db:
+        row = load_row(db)
+        row.data = AppSettings(min_interval_s=2.5, max_attempts=3).model_dump(mode="json")
+        db.commit()
+    seen = {}
+
+    def capture(path, llm, *, options=None, on_progress=None, document_name=None):
+        seen["cfg"] = llm
+        return SAMPLE
+
+    monkeypatch.setattr(req_core, "validate_document", capture)
+    run_id = make_run(svc)
+    assert run_validation.delay(run_id).get() == "done"
+    assert seen["cfg"].min_interval_s == 2.5 and seen["cfg"].max_attempts == 3
+    with SessionLocal() as db:
+        load_row(db).data = AppSettings().model_dump(mode="json")
+        db.commit()

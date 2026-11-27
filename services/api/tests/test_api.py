@@ -76,6 +76,72 @@ async def test_providers(client):
     assert r.status_code == 422
 
 
+async def test_settings(client, anon):
+    r = await client.get("/api/settings")
+    s = r.json()
+    assert s["default_provider"] == "gemini" and s["run_timeout_s"] == 1800 and s["embeddings_provider"] == "local"
+    assert s["embeddings_has_key"] is False and s["max_upload_mb"] == 25
+    assert (await anon.get("/api/settings")).status_code == 401
+
+    r = await client.put("/api/settings", json={"batch_size": 3, "concurrency": 2, "min_interval_s": 1.5,
+                                                "max_attempts": 2, "max_upload_mb": 1,
+                                                "embeddings_api_key": "emb-secret-123456"})
+    assert r.status_code == 200, r.text
+    s = r.json()
+    assert (s["batch_size"], s["concurrency"], s["min_interval_s"], s["max_attempts"]) == (3, 2, 1.5, 2)
+    assert s["embeddings_has_key"] and s["embeddings_key_hint"] == "…3456" and "emb-secret" not in r.text
+    assert (await client.put("/api/settings", json={"batch_size": 0})).status_code == 422
+    assert (await client.put("/api/settings", json={"embeddings_provider": "cohere"})).status_code == 422
+
+    # лимит загрузки — из настроек
+    assert (await anon.get("/api/health")).json()["limits"] == {"max_upload_mb": 1}
+    r = await client.post("/api/documents", files={"file": ("big.txt", b"x" * (1024 * 1024 + 10), "text/plain")})
+    assert r.status_code == 413
+    await client.put("/api/settings", json={"max_upload_mb": 25, "embeddings_api_key": ""})
+    assert (await client.get("/api/settings")).json()["embeddings_has_key"] is False
+
+
+async def test_provider_test_uses_unsaved_values(client):
+    calls = testing.CORE_CALLS
+    r = await client.post("/api/providers/openai/test", json={"api_key": "sk-unsaved-1"})
+    body = r.json()
+    assert body["ok"] is True and body["models"] == ["model-a", "model-b"], body
+    assert calls["complete"].api_key.get_secret_value() == "sk-unsaved-1"
+    assert calls["complete"].max_attempts == 1  # проверка без повторов
+    providers = {p["provider"]: p for p in (await client.get("/api/providers")).json()}
+    assert providers["openai"]["has_key"] is False  # значения из формы не сохраняются
+
+    r = await client.post("/api/providers/openai/test", json={"api_key": "bad-key"})
+    assert r.json()["ok"] is False and "401" in r.json()["error"] and r.json()["models"] == []
+    r = await client.post("/api/providers/openai/test")
+    assert r.json()["ok"] is False and "API-ключ" in r.json()["error"]
+
+
+async def test_openai_compatible_without_key(client):
+    r = await client.post("/api/providers/openai_compatible/test")
+    assert r.json()["ok"] is False and "base_url" in r.json()["error"]
+    providers = {p["provider"]: p for p in (await client.get("/api/providers")).json()}
+    assert providers["openai_compatible"]["base_url"] is None  # без адреса по умолчанию
+
+    url = "http://vllm.example.local:8000/v1"
+    r = await client.post("/api/providers/openai_compatible/test", json={"base_url": url})
+    body = r.json()
+    assert body["ok"] is True and body["models"] == ["model-a", "model-b"]
+    cfg = testing.CORE_CALLS["complete"]
+    assert cfg.base_url == url and cfg.api_key is None and cfg.model == "model-a"
+
+    await client.put("/api/providers/openai_compatible", json={"base_url": url})
+    r = await client.get("/api/providers/openai_compatible/models")
+    assert r.json() == {"models": ["model-a", "model-b"], "error": None}
+    assert testing.CORE_CALLS["list_models"].base_url == url
+    doc = (await client.post("/api/documents", files={"file": ("tmp.md", b"# x", "text/markdown")})).json()
+    r = await client.post("/api/runs", json={"document_id": doc["id"], "provider": "openai_compatible",
+                                             "model": "model-a", "options": {"batch_size": 10}})
+    assert r.status_code == 202, r.text
+    assert r.json()["options"]["batch_size"] == 10 and r.json()["options"]["concurrency"] == 2
+    assert (await client.delete(f"/api/documents/{doc['id']}")).status_code == 204
+
+
 async def test_upload_document(client):
     r = await client.post("/api/documents", files={"file": ("requirements.md", DOC_TEXT, "text/markdown")})
     assert r.status_code == 201, r.text
@@ -107,6 +173,7 @@ async def test_create_run_and_errors(client, services):
     run = r.json()
     assert run["status"] == "queued" and run["document_name"] == "requirements.md"
     assert run["options"]["verify_pass"] is True
+    assert run["options"]["batch_size"] == 3 and run["options"]["concurrency"] == 2  # из /settings
     assert services.enqueued[-1] == run["id"]
     state["run"] = run
 
@@ -235,6 +302,22 @@ async def test_knowledge(client, services):
     assert r.status_code == 409 and r.json()["code"] == "builtin_protected"
     assert (await client.post("/api/knowledge", json={"title": "x"})).status_code == 422
 
+
+async def test_embeddings_change_reindexes(client, services):
+    """Смена модели эмбеддингов в настройках → коллекции пересоздаются, всё индексируется заново."""
+    from app.vectors import REQUIREMENTS
+
+    r = await client.put("/api/settings", json={"embeddings_model": "intfloat/multilingual-e5-base"})
+    assert r.json()["embeddings_model"] == "intfloat/multilingual-e5-base"
+    assert REQUIREMENTS in services.qdrant.get_collections().model_dump_json()
+    hits = (await client.get("/api/search", params={"q": SAMPLE["findings"][0]["title"], "kind": "finding"})).json()
+    assert hits and hits[0]["finding_id"] == SAMPLE["findings"][0]["id"]
+    items = (await client.get("/api/knowledge")).json()
+    assert items and all(i["status"] == "ready" for i in items)
+    r = await client.put("/api/settings", json={"embeddings_model": None})
+    assert r.json()["embeddings_model"] is None
+    actions = [a["action"] for a in (await client.get("/api/audit")).json()["items"]]
+    assert "settings_updated" in actions
 
 def test_reindex_into_empty_qdrant():
     """Пустой Qdrant (или смена модели эмбеддингов) → api при старте переиндексирует базу знаний и отчёты."""

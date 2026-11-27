@@ -5,7 +5,9 @@ import httpx
 import numpy as np
 import pytest
 import sentence_transformers
-from embedder.backends import GeminiBackend, HashBackend, LocalBackend, OpenAIBackend, build_backend
+import embedder.main as main_mod
+from embedder import backends
+from embedder.backends import ConfigError, GeminiBackend, HashBackend, LocalBackend, OpenAIBackend, remote_backend
 from embedder.main import create_app
 from fastapi.testclient import TestClient
 
@@ -27,9 +29,33 @@ def test_info_and_embed(client):
     assert "reqcheck_embedder_texts_total" in client.get("/metrics").text
 
 
-def test_default_backend_from_env():
-    with TestClient(create_app()) as c:  # EMBEDDINGS_PROVIDER=hash в тестовом образе
-        assert c.get("/info").json()["provider"] == "hash"
+def test_local_backend_built_at_startup(tmp_path, monkeypatch):
+    monkeypatch.setattr(backends, "MODEL_FILE", tmp_path / "MODEL")
+    assert backends.local_model_name() == "intfloat/multilingual-e5-small"  # файла нет — модель по умолчанию
+    (tmp_path / "MODEL").write_text("intfloat/multilingual-e5-base")
+    assert backends.local_model_name() == "intfloat/multilingual-e5-base"
+    with TestClient(create_app(local_factory=lambda: HashBackend(8))) as c:
+        assert c.get("/info").json()["dim"] == 8
+
+
+def test_remote_provider_per_request(client, monkeypatch):
+    seen = {}
+
+    def fake_remote(provider, model, api_key, dim=None):
+        seen.update(provider=provider, model=model, api_key=api_key, dim=dim)
+        return HashBackend(dim or 16)
+
+    monkeypatch.setattr(main_mod, "remote_backend", fake_remote)
+    r = client.post("/embed", json={"texts": ["x"], "kind": "query", "provider": "gemini", "api_key": "k", "dim": 24})
+    assert r.status_code == 200 and r.json()["dim"] == 24
+    assert seen == {"provider": "gemini", "model": None, "api_key": "k", "dim": 24}
+    # без провайдера — локальная модель
+    assert client.post("/embed", json={"texts": ["x"]}).json()["dim"] == 32
+
+
+def test_remote_without_key_is_400(client):
+    r = client.post("/embed", json={"texts": ["x"], "provider": "openai"})
+    assert r.status_code == 400 and "api_key" in r.json()["detail"]
 
 
 class FakeST:
@@ -75,11 +101,11 @@ def test_openai_backend():
     assert b.dim == 3 and b.embed(["x"], "passage") == [[0.0, 1.0, 0.0]]
 
 
-def test_build_backend_errors():
-    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
-        build_backend({"EMBEDDINGS_PROVIDER": "gemini"})
-    with pytest.raises(RuntimeError, match="Unknown"):
-        build_backend({"EMBEDDINGS_PROVIDER": "nope"})
-    b = build_backend({"EMBEDDINGS_PROVIDER": "openai", "OPENAI_API_KEY": "k",
-                       "EMBEDDINGS_MODEL": "intfloat/multilingual-e5-small"})
-    assert b.model == "text-embedding-3-small"
+def test_remote_backend_factory():
+    with pytest.raises(ConfigError, match="api_key"):
+        remote_backend("gemini", None, None)
+    with pytest.raises(ConfigError, match="Unknown"):
+        remote_backend("nope", None, "k")
+    b = remote_backend("openai", None, "k")
+    assert b.model == "text-embedding-3-small" and remote_backend("openai", None, "k") is b
+    assert remote_backend("gemini", None, "k", 256).dim == 256

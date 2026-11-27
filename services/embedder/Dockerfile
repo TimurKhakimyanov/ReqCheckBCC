@@ -15,10 +15,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM base AS runtime
 ARG AGENT_VERSION=dev
 ARG EMBEDDINGS_MODEL=intfloat/multilingual-e5-small
-ENV AGENT_VERSION=${AGENT_VERSION} EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL}
-RUN python -c "import os; from sentence_transformers import SentenceTransformer as S; \
-m = S(os.environ['EMBEDDINGS_MODEL'], device='cpu'); print('model ready, dim', m.get_sentence_embedding_dimension())" \
-    && chmod -R a+rX /models
+ENV AGENT_VERSION=${AGENT_VERSION}
+# Модель вшивается в образ, её имя — в /models/MODEL (в рантайме окружение не читается)
+RUN python -c "import sys; from sentence_transformers import SentenceTransformer as S; \
+m = S(sys.argv[1], device='cpu'); print('model ready, dim', m.get_sentence_embedding_dimension())" "$EMBEDDINGS_MODEL" \
+    && printf '%s' "$EMBEDDINGS_MODEL" > /models/MODEL && chmod -R a+rX /models
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 OMP_NUM_THREADS=2
 RUN useradd --system --uid 10001 --home /nonexistent app
 WORKDIR /repo/services/embedder
@@ -30,6 +31,6 @@ CMD ["uvicorn", "embedder.main:app", "--host", "0.0.0.0", "--port", "8001", "--n
 
 FROM base AS test
 RUN --mount=type=cache,target=/root/.cache/uv uv pip install -e "./services/embedder[test]"
-ENV HF_HUB_OFFLINE=1 EMBEDDINGS_PROVIDER=hash
+ENV HF_HUB_OFFLINE=1
 WORKDIR /repo/services/embedder
 CMD ["pytest", "-q", "-p", "no:cacheprovider"]

@@ -24,7 +24,8 @@ def mock_core():
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(req_core, "answer_question", testing.fake_answer_question)
         mp.setattr(req_core, "render_report", testing.fake_render_report)
-        mp.setattr(req_core, "list_models", lambda cfg: ["model-b", "model-a"])
+        mp.setattr(req_core, "list_models", testing.fake_list_models)
+        mp.setattr(req_core, "get_llm", testing.fake_get_llm)
         yield
 
 

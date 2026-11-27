@@ -30,9 +30,19 @@ class VectorStore:
         self._ready: set[str] = set()
         # коллекции, созданные (или пересозданные из-за смены размерности) этим процессом — нужна переиндексация
         self.created: set[str] = set()
+        self._signature: str | None = None
         self._lock = threading.Lock()
 
+    def reset(self) -> None:
+        with self._lock:
+            self._ready.clear()
+
     def ensure_collection(self, name: str) -> None:
+        signature = self.embedder.signature()
+        if signature != self._signature:  # сменились настройки эмбеддингов — перепроверить коллекции
+            with self._lock:
+                self._ready.clear()
+                self._signature = signature
         if name in self._ready:
             return
         with self._lock:

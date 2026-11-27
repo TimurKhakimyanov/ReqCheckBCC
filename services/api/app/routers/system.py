@@ -9,6 +9,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import func, select, text
 from starlette.concurrency import run_in_threadpool
 
+from ..app_settings import read_app_settings
 from ..config import get_settings
 from ..db import SessionLocal
 from ..deps import DB, CurrentUser, Svc
@@ -43,8 +44,8 @@ async def health(svc: Svc) -> HealthOut:
     )
     checks = dict(results)
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
-    s = get_settings()
-    return HealthOut(status=status, version=s.agent_version, checks=checks, limits={"max_upload_mb": s.max_upload_mb})
+    limits = {"max_upload_mb": (await run_in_threadpool(read_app_settings)).max_upload_mb}
+    return HealthOut(status=status, version=get_settings().agent_version, checks=checks, limits=limits)
 
 
 def _add(row: UsageRow, usage: dict | None) -> None:

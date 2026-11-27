@@ -69,10 +69,18 @@ class ProviderUpdate(BaseModel):
     default_model: str | None = None
 
 
+class ProviderTestIn(BaseModel):
+    """Несохранённые значения из формы; проверяются поверх сохранённых и не записываются."""
+
+    api_key: str | None = None
+    base_url: str | None = None
+
+
 class ProviderTestOut(BaseModel):
     ok: bool
     latency_ms: int
     error: str | None = None
+    models: list[str] = Field(default_factory=list, description="Модели, доступные с этими ключом и адресом")
 
 
 class ModelsOut(BaseModel):

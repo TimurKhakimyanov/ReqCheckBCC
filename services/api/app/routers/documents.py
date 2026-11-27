@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from starlette.concurrency import run_in_threadpool
 
 from ..audit import audit
-from ..config import get_settings
+from ..app_settings import get_app_settings
 from ..deps import DB, CurrentUser, Svc, parse_uuid
 from ..errors import ApiError, not_found
 from ..metrics import DOCUMENTS_UPLOADED
@@ -55,10 +55,11 @@ async def upload_document(request: Request, user: CurrentUser, db: DB, svc: Svc,
     fmt = FORMATS.get(PurePath(name).suffix.lower())
     if fmt is None:
         raise ApiError(415, "unsupported_format", "Поддерживаются файлы PDF, DOCX, MD и TXT")
-    limit = get_settings().max_upload_mb * 1024 * 1024
+    max_mb = get_app_settings(db).max_upload_mb
+    limit = max_mb * 1024 * 1024
     data = await file.read(limit + 1)
     if len(data) > limit:
-        raise ApiError(413, "file_too_large", f"Файл больше {get_settings().max_upload_mb} МБ")
+        raise ApiError(413, "file_too_large", f"Файл больше {max_mb} МБ")
     if not data:
         raise ApiError(400, "empty_file", "Файл пустой")
     doc = Document(id=uuid.uuid4(), name=name, format=fmt, size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest(),

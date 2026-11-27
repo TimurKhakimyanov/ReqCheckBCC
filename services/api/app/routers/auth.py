@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, Response
 from sqlalchemy import select
 
+from ..app_settings import get_app_settings
 from ..audit import audit
 from ..config import get_settings
 from ..deps import DB, CurrentUser
@@ -26,10 +27,10 @@ def login(body: LoginIn, request: Request, response: Response, db: DB) -> UserOu
         LOGINS.labels(result="failed").inc()
         audit(db, body.username[:150], "login_failed", request=request)
         raise ApiError(401, "invalid_credentials", "Неверный логин или пароль")
-    s = get_settings()
+    ttl = get_app_settings(db).session_ttl_hours
     response.set_cookie(
-        COOKIE_NAME, create_session_token(user.id, user.username), max_age=s.session_ttl_hours * 3600,
-        httponly=True, secure=s.cookie_secure, samesite="lax", path="/",
+        COOKIE_NAME, create_session_token(user.id, user.username, ttl), max_age=ttl * 3600,
+        httponly=True, secure=get_settings().cookie_secure, samesite="lax", path="/",
     )
     LOGINS.labels(result="ok").inc()
     audit(db, user.username, "login", request=request)

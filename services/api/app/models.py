@@ -143,3 +143,14 @@ class AuditLog(Base):
     target: Mapped[str | None] = mapped_column(String(500), nullable=True)
     details: Mapped[dict] = mapped_column(JSONB, default=dict)
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class AppSettingsRow(Base):
+    """Единственная строка (id=1) с настройками приложения; см. app/app_settings.py."""
+
+    __tablename__ = "app_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSONB, default=dict)
+    embeddings_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embeddings_key_hint: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

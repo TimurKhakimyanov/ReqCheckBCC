@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import req_core
-from app.config import get_settings
+from app.app_settings import read_app_settings
 from app.db import SessionLocal
 from app.indexing import index_report
 from app.models import Document, ReportRow, Run
@@ -221,7 +221,7 @@ def _record_usage_metrics(provider: str, model: str, report: Report) -> None:
 
 def execute_run(run_id: str, svc: Services | None = None) -> str:
     svc = svc or get_services()
-    settings = get_settings()
+    settings = read_app_settings()  # таймаут и параметры прогона — из админки
     rid = uuid.UUID(run_id)
     started = time.monotonic()
     progress = Progress(svc, run_id)

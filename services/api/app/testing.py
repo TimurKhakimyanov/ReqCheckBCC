@@ -114,3 +114,29 @@ def fake_render_report(report, fmt) -> bytes:
     if fmt == "json":
         return report.model_dump_json().encode()
     return f"%{fmt.upper()} report for {report.passport.document_name}".encode()
+
+
+# Последние конфиги, с которыми API звал ядро (проверка, что ключи/адреса/параметры берутся из БД)
+CORE_CALLS: dict[str, object] = {}
+
+
+def fake_list_models(cfg) -> list[str]:
+    CORE_CALLS["list_models"] = cfg
+    if cfg.api_key is not None and cfg.api_key.get_secret_value() == "bad-key":
+        raise PermissionError("401 invalid api key")
+    return ["model-b", "model-a"]
+
+
+class _FakeLLM:
+    def __init__(self, cfg):
+        self.cfg = cfg
+
+    def complete(self, system: str, user: str) -> str:
+        CORE_CALLS["complete"] = self.cfg
+        if self.cfg.api_key is not None and self.cfg.api_key.get_secret_value() == "bad-key":
+            raise PermissionError("401 invalid api key")
+        return "pong"
+
+
+def fake_get_llm(cfg) -> _FakeLLM:
+    return _FakeLLM(cfg)
