@@ -56,7 +56,7 @@ export const DocumentViewer = memo(function DocumentViewer({
           {t('report.unlocated', { count: unlocated.length, ids: unlocated.map((f) => f.id).join(', ') })}
         </div>
       )}
-      <div className="px-6 py-5 text-[0.9rem] leading-7 break-words whitespace-pre-wrap">
+      <div className="mx-auto max-w-[78ch] px-6 py-6 text-[0.9375rem] leading-7 break-words whitespace-pre-wrap">
         {segments.map((s) => {
           if (!s.ranges.length) return <span key={s.start}>{s.text}</span>
           const isFocus = s.ranges.some((r) => r.findingId === '__focus')

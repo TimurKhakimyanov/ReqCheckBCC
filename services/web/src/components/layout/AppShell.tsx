@@ -35,8 +35,8 @@ const NAV = [
 function Brand({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation()
   return (
-    <div className="flex items-center gap-2 px-2 font-semibold">
-      <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+    <div className="flex items-center gap-2 px-1.5 font-medium tracking-tight">
+      <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-primary">
         <ShieldCheck className="size-4" />
       </span>
       {!compact && t('app.name')}
@@ -63,7 +63,8 @@ function SidebarContent({ onNavigate, compact = false, onToggle }: { onNavigate?
           </Button>
         )}
       </div>
-      <nav className="flex flex-1 flex-col gap-0.5">
+      <nav className="flex flex-1 flex-col gap-1">
+        {!compact && <div className="label-mono px-2.5 pt-2 pb-1">[ ReqCheck ]</div>}
         {NAV.map(({ to, icon: Icon, key }) => (
           <NavLink
             key={to}
@@ -73,9 +74,9 @@ function SidebarContent({ onNavigate, compact = false, onToggle }: { onNavigate?
             aria-label={compact ? t(key) : undefined}
             className={({ isActive }) =>
               cn(
-                'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground',
+                'press flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground/75 hover:bg-accent hover:text-foreground',
                 compact && 'justify-center',
-                isActive && 'bg-accent text-accent-foreground',
+                isActive && 'bg-card font-[450] text-foreground shadow-card hover:bg-card dark:bg-accent [&_svg]:text-primary',
               )
             }
           >
@@ -85,7 +86,7 @@ function SidebarContent({ onNavigate, compact = false, onToggle }: { onNavigate?
         ))}
       </nav>
       {USE_MOCKS && !compact && (
-        <div className="rounded-md border border-dashed px-2.5 py-2 text-xs text-muted-foreground">{t('app.mockMode')}</div>
+        <div className="rounded-lg border border-dashed border-primary/40 bg-primary-tint px-2.5 py-2 text-xs text-foreground/80">{t('app.mockMode')}</div>
       )}
       <div className={cn('flex items-center justify-between gap-1 border-t pt-3', compact && 'flex-col')}>
         {!compact && (
@@ -147,7 +148,7 @@ export function AppShell() {
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 items-center gap-2 border-b px-3 lg:hidden">
+        <header className="flex h-12 items-center gap-2 border-b bg-background/90 px-3 backdrop-blur lg:hidden">
           <Button variant="ghost" size="icon-sm" onClick={() => setOpen(true)} aria-label={t('nav.menu')}>
             <Menu />
           </Button>

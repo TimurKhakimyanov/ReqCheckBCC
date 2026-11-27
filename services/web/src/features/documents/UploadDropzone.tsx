@@ -84,11 +84,13 @@ export function UploadDropzone({ onUploaded }: { onUploaded?: (doc: DocumentItem
         onDrop={onDrop}
         data-testid="dropzone"
         className={cn(
-          'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-card px-6 py-8 text-center transition-colors outline-none hover:border-primary/60 focus-visible:ring-[3px] focus-visible:ring-ring/50',
-          drag && 'border-primary bg-accent',
+          'bg-grid group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-foreground/15 bg-card px-6 py-10 text-center shadow-xs transition-colors outline-none hover:border-primary/60 focus-visible:ring-[3px] focus-visible:ring-ring/30',
+          drag && 'border-primary bg-primary-tint',
         )}
       >
-        <FileUp className="size-8 text-muted-foreground" />
+        <span className="mb-1 flex size-11 items-center justify-center rounded-xl bg-card text-muted-foreground shadow-card transition-colors group-hover:text-primary">
+          <FileUp className="size-5" />
+        </span>
         <p className="font-medium">{t('upload.title')}</p>
         <p className="text-sm text-muted-foreground">{t('upload.hint', { mb: maxMb })}</p>
         <input

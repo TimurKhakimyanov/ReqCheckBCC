@@ -128,7 +128,7 @@ export function ReportView({ run }: { run: Run }) {
       <div className="flex h-full min-h-0">
         <div className="flex min-w-0 flex-1 flex-col">
           {/* Заголовок */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b bg-card/60 px-4 py-3">
             <Link
               to={`/documents/${run.document_id}`}
               className="text-muted-foreground hover:text-foreground"
@@ -137,27 +137,28 @@ export function ReportView({ run }: { run: Run }) {
               <ArrowLeft className="size-5" />
             </Link>
             <div className="min-w-0 flex-1">
-              <h1 className="flex items-center gap-2 truncate text-lg font-semibold">
+              <div className="label-mono mb-0.5 hidden sm:block">[ {t('report.eyebrow')} ]</div>
+              <h1 className="flex items-center gap-2 truncate text-lg font-medium tracking-tight">
                 <FileText className="size-4 shrink-0 text-muted-foreground" />
                 <span className="truncate">{r.passport.document_name}</span>
               </h1>
-              <p className="text-xs text-muted-foreground">
+              <p className="truncate text-xs text-muted-foreground">
                 {formatDate(r.passport.run_at)} · {t(`provider.${r.passport.provider}`, { defaultValue: r.passport.provider })} ·{' '}
                 {r.passport.model} · {t('report.reqCount', { count: r.summary.requirements_total })} ·{' '}
                 {t('report.findingCount', { count: r.summary.findings_total })}
               </p>
             </div>
             <ReadinessBadge ready={r.conclusion.ready_for_development} />
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setRelaunch(true)}>
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <Button variant="outline" size="sm" onClick={() => setRelaunch(true)} aria-label={t('report.rerun')}>
                 <Play />
-                {t('report.rerun')}
+                <span className="hidden md:inline">{t('report.rerun')}</span>
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="sm" aria-label={t('report.export')}>
                     <Download />
-                    {t('report.export')}
+                    <span className="hidden md:inline">{t('report.export')}</span>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -168,7 +169,13 @@ export function ReportView({ run }: { run: Run }) {
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button variant={chatOpen ? 'secondary' : 'default'} size="sm" onClick={() => setChatOpen((v) => !v)} aria-pressed={chatOpen}>
+              <Button
+                variant={chatOpen ? 'secondary' : 'default'}
+                size="sm"
+                className="ml-auto sm:ml-0"
+                onClick={() => setChatOpen((v) => !v)}
+                aria-pressed={chatOpen}
+              >
                 <MessageSquareText />
                 {t('chat.open')}
               </Button>
@@ -176,7 +183,7 @@ export function ReportView({ run }: { run: Run }) {
           </div>
 
           <Tabs value={tab} onValueChange={(v) => setTab(v as ReportTab)} className="flex min-h-0 flex-1 flex-col">
-            <div className="overflow-x-auto border-b px-4 py-2">
+            <div className="overflow-x-auto border-b px-4 py-2 [scrollbar-width:none]">
               <TabsList>
                 {TABS.map((v) => (
                   <TabsTrigger key={v} value={v}>
@@ -201,7 +208,7 @@ export function ReportView({ run }: { run: Run }) {
                     focusRange={focusReq}
                   />
                 </div>
-                <div className="min-h-0 bg-muted/20">
+                <div className="min-h-0 bg-background">
                   <FindingsPanel visible={visible} filters={filters} setFilters={setFilters} />
                 </div>
               </div>

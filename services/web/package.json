@@ -14,6 +14,8 @@
     "check:types-gen": "json2ts -i ../../packages/contracts/req_contracts/fixtures/report.schema.json --additionalProperties false --bannerComment \"/* Generated from packages/contracts/req_contracts/fixtures/report.schema.json by pnpm gen:types. Do not edit. */\" -o /tmp/report.gen.ts && diff -q /tmp/report.gen.ts src/api/report.gen.ts"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.2.5",
+    "@fontsource-variable/geist-mono": "^5.2.5",
     "@tanstack/react-query": "^5.80.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

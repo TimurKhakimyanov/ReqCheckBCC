@@ -11,7 +11,7 @@ export function DropdownMenuContent({ className, sideOffset = 4, ...props }: Rea
     <DM.Portal>
       <DM.Content
         sideOffset={sideOffset}
-        className={cn('z-50 min-w-36 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md', className)}
+        className={cn('z-50 min-w-36 overflow-hidden rounded-xl bg-popover p-1 text-popover-foreground shadow-raised', className)}
         {...props}
       />
     </DM.Portal>
@@ -19,7 +19,7 @@ export function DropdownMenuContent({ className, sideOffset = 4, ...props }: Rea
 }
 
 const itemCls =
-  'relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:opacity-50 [&_svg]:size-4'
+  'relative flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:opacity-50 [&_svg]:size-4'
 
 export function DropdownMenuItem({ className, ...props }: React.ComponentProps<typeof DM.Item>) {
   return <DM.Item className={cn(itemCls, className)} {...props} />

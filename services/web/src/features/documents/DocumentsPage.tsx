@@ -28,12 +28,12 @@ export function DocumentsPage() {
 
   return (
     <>
-      <PageHeader title={t('documents.title')} description={t('documents.subtitle')} />
+      <PageHeader eyebrow="[ 01 ] ReqCheck" title={t('documents.title')} description={t('documents.subtitle')} />
       <UploadDropzone onUploaded={(doc) => setLaunchFor(doc)} />
 
-      <div className="mt-8 mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">{t('documents.list')}</h2>
-        <div className="relative w-full max-w-xs">
+      <div className="mt-8 mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-medium tracking-tight">{t('documents.list')}</h2>
+        <div className="relative w-full sm:max-w-xs">
           <Search className="absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
           <Input className="pl-8" placeholder={t('documents.filter')} value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
@@ -50,6 +50,34 @@ export function DocumentsPage() {
         ) : docs.data?.items.length === 0 ? (
           <EmptyState icon={<FileText />} title={t('documents.empty')} hint={t('documents.emptyHint')} />
         ) : (
+          <>
+          {/* телефон: карточки вместо таблицы */}
+          <ul className="divide-y sm:hidden" data-testid="documents-cards">
+            {docs.data?.items.map((d) => (
+              <li key={d.id} className="grid gap-2 p-4">
+                <Link to={`/documents/${d.id}`} className="flex items-center gap-2 font-medium">
+                  <FileText className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{d.name}</span>
+                </Link>
+                <div className="text-xs text-muted-foreground">
+                  {d.format.toUpperCase()} · {formatBytes(d.size_bytes)} · {formatRelative(d.created_at)}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {d.last_run && (
+                    <Link to={`/runs/${d.last_run.id}`}>
+                      <RunStatusBadge status={d.last_run.status} />
+                    </Link>
+                  )}
+                  <SeverityCounts summary={d.last_run?.summary} />
+                </div>
+                <Button size="sm" variant="outline" className="justify-self-start" onClick={() => setLaunchFor(d)}>
+                  <Play />
+                  {t('documents.check')}
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <div className="hidden sm:block">
           <Table>
             <THead>
               <TR>
@@ -98,6 +126,8 @@ export function DocumentsPage() {
               ))}
             </TBody>
           </Table>
+          </div>
+          </>
         )}
       </Card>
       <LaunchRunDialog document={launchFor} open={!!launchFor} onOpenChange={(v) => !v && setLaunchFor(null)} />

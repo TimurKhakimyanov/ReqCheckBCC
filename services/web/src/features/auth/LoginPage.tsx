@@ -42,18 +42,23 @@ export function LoginPage() {
     login.error instanceof ApiError && login.error.status === 401 ? t('auth.invalid') : login.error ? login.error.message : null
 
   return (
-    <div className="flex min-h-full flex-col bg-muted/40">
-      <div className="flex justify-end gap-1 p-3">
+    <div className="bg-grid relative flex min-h-full flex-col bg-background">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(ellipse_at_top,var(--primary-tint),transparent_70%)]"
+      />
+      <div className="relative flex justify-end gap-1 p-3">
         <LanguageSwitch />
         <ThemeToggle />
       </div>
-      <div className="flex flex-1 items-center justify-center p-4 pb-24">
-        <Card className="w-full max-w-sm">
+      <div className="relative flex flex-1 items-center justify-center p-4 pb-24">
+        <Card className="w-full max-w-sm shadow-raised">
           <CardHeader className="items-center text-center">
-            <div className="mb-2 flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <div className="label-mono mb-3">[ ISO 29148 · IEEE 830 ]</div>
+            <div className="mb-2 flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-primary">
               <ShieldCheck className="size-6" />
             </div>
-            <CardTitle className="text-xl">{t('app.name')}</CardTitle>
+            <CardTitle className="text-2xl font-medium tracking-[-0.02em]">{t('app.name')}</CardTitle>
             <CardDescription>{t('auth.subtitle')}</CardDescription>
           </CardHeader>
           <CardContent>

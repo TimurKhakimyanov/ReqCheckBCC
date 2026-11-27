@@ -32,7 +32,7 @@ describe('Report screen', () => {
 
     await user.click(container.querySelector('mark[data-ids~="D-005"]') as HTMLElement)
     const card5 = list.querySelector('[data-finding="D-005"]') as HTMLElement
-    expect(card5.className).toMatch(/ring-2/)
+    expect(card5).toHaveAttribute('data-active', 'true')
     expect(container.querySelector('mark[data-ids~="D-002"]')).toHaveAttribute('data-active', 'false')
   })
 

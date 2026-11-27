@@ -249,7 +249,8 @@
     "noChecklistHint": "The document has no “Requirements review” section, or filling it was turned off in run options",
     "question": "Question",
     "answer": "Answer",
-    "comment": "Comment"
+    "comment": "Comment",
+    "eyebrow": "Review report"
   },
   "passport": {
     "title": "Run passport",
