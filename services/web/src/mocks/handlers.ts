@@ -17,6 +17,13 @@ import {
 } from './data'
 
 const A = (p: string) => `*/api${p}`
+const MAX_UPLOAD_MB = 25
+
+/** Content-Disposition как у бэкенда: ASCII-запасное имя + filename* в UTF-8 (кириллица). */
+function contentDisposition(name: string) {
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`
+}
 const err = (status: number, detail: string, code = 'error') => HttpResponse.json({ detail, code }, { status })
 const LATENCY = import.meta.env.MODE === 'test' ? 0 : 150
 
@@ -35,7 +42,9 @@ function guard(fn: (info: Info) => Response | Promise<Response>) {
   }
 }
 
-function sseStream(producer: (send: (event: string, data: unknown) => void, close: () => void) => () => void, signal: AbortSignal) {
+type Producer = (send: (event: string, data: unknown) => void, close: () => void, raw: (text: string) => void) => () => void
+
+function sseStream(producer: Producer, signal: AbortSignal) {
   const enc = new TextEncoder()
   let cleanup: () => void = () => {}
   const stream = new ReadableStream<Uint8Array>({
@@ -51,7 +60,10 @@ function sseStream(producer: (send: (event: string, data: unknown) => void, clos
           /* already closed */
         }
       }
-      cleanup = producer((event, data) => !closed && controller.enqueue(enc.encode(formatSSE(event, data))), close)
+      const raw = (text: string) => {
+        if (!closed) controller.enqueue(enc.encode(text))
+      }
+      cleanup = producer((event, data) => raw(formatSSE(event, data)), close, raw)
       signal.addEventListener('abort', close)
     },
     cancel() {
@@ -112,8 +124,16 @@ export const handlers = [
     guard(async ({ request }: { request: Request }) => {
       const body = (await request.json()) as { locale?: string; password?: { current: string; new: string } }
       if (body.password) {
-        if (body.password.current !== db.password) return err(400, 'Current password is wrong', 'wrong_password')
-        if (body.password.new.length < 8) return err(422, 'Password must be at least 8 characters', 'weak_password')
+        if (body.password.current !== db.password) return err(400, 'Текущий пароль неверен', 'wrong_password')
+        if (body.password.new.length < 8)
+          return HttpResponse.json(
+            {
+              detail: 'Некорректные данные: password.new: String should have at least 8 characters',
+              code: 'validation_error',
+              errors: [{ loc: ['body', 'password', 'new'], msg: 'String should have at least 8 characters', type: 'string_too_short' }],
+            },
+            { status: 422 },
+          )
         db.password = body.password.new
         logAudit('auth.password_change', db.user.username)
       }
@@ -149,15 +169,22 @@ export const handlers = [
       const p = db.providers[params.provider as ProviderId]
       if (!p) return err(404, 'Unknown provider')
       await delay(import.meta.env.MODE === 'test' ? 0 : 700)
-      const ok = p.has_key || (p.provider === 'openai_compatible' && !!p.base_url)
-      return HttpResponse.json({ ok, latency_ms: ok ? 412 : 0, error: ok ? null : 'API key is not set' })
+      const ok = p.has_key
+      return HttpResponse.json({
+        ok,
+        latency_ms: ok ? 412 : 3,
+        error: ok ? null : p.provider === 'openai_compatible' ? `Нет соединения с ${p.base_url}` : 'API-ключ не задан',
+      })
     }),
   ),
   http.get(
     A('/providers/:provider/models'),
     guard(({ params }: { params: Record<string, string> }) => {
+      const p = db.providers[params.provider as ProviderId]
       const models = MODELS[params.provider as ProviderId]
-      return models ? HttpResponse.json({ models }) : err(404, 'Unknown provider')
+      if (!p || !models) return err(404, 'Unknown provider', 'not_found')
+      // как бэкенд: без доступа к провайдеру — список-подсказка и текст ошибки, но всегда 200
+      return HttpResponse.json(p.has_key ? { models } : { models, error: 'API-ключ не задан — показан список по умолчанию' })
     }),
   ),
 
@@ -180,10 +207,12 @@ export const handlers = [
     guard(async ({ request }: { request: Request }) => {
       const form = await request.formData()
       const file = form.get('file')
-      if (!(file instanceof File)) return err(422, 'File is required', 'file_required')
+      if (!(file instanceof File)) return err(422, 'Некорректные данные: file: Field required', 'validation_error')
       const ext = file.name.split('.').pop()?.toLowerCase() as DocumentFormat
-      if (!['pdf', 'docx', 'md', 'txt'].includes(ext)) return err(415, 'Unsupported format', 'unsupported_format')
-      if (file.size > 25 * 1024 * 1024) return err(413, 'File is too large', 'too_large')
+      if (!['pdf', 'docx', 'md', 'txt'].includes(ext))
+        return err(415, 'Формат не поддерживается: нужен PDF, DOCX, MD или TXT', 'unsupported_format')
+      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return err(413, `Файл больше ${MAX_UPLOAD_MB} МБ`, 'file_too_large')
+      if (file.size === 0) return err(400, 'Файл пустой', 'empty_file')
       const doc = {
         id: uid('doc'),
         name: file.name,
@@ -213,7 +242,7 @@ export const handlers = [
       const d = db.documents.find((x) => x.id === params.id)
       if (!d) return err(404, 'Document not found', 'not_found')
       return new HttpResponse(db.docTexts[d.id] ?? '', {
-        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="${encodeURIComponent(d.name)}"` },
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': contentDisposition(d.name) },
       })
     }),
   ),
@@ -248,12 +277,16 @@ export const handlers = [
       const body = (await request.json()) as RunCreate
       const doc = db.documents.find((d) => d.id === body.document_id)
       if (!doc) return err(404, 'Document not found', 'not_found')
-      const prov = db.providers[body.provider as ProviderId]
-      if (!prov) return err(422, 'Unknown provider', 'unknown_provider')
-      if (!prov.has_key && body.provider !== 'openai_compatible')
-        return err(422, `Provider ${body.provider} has no API key. Add it in Settings.`, 'provider_not_configured')
-      const run = newRun(doc, body.provider, body.model, body.options ?? {})
-      logAudit('run.create', run.id, { provider: body.provider, model: body.model })
+      // provider/model необязательны: по умолчанию — первый провайдер с ключом и его модель
+      const prov = body.provider
+        ? db.providers[body.provider as ProviderId]
+        : PROVIDERS.map((p) => db.providers[p]).find((p) => p.enabled && p.has_key)
+      if (!prov) return err(400, 'Нет провайдера с ключом. Добавьте ключ в кабинете.', 'provider_not_configured')
+      if (!prov.has_key && prov.provider !== 'openai_compatible')
+        return err(400, `У провайдера ${prov.provider} не задан API-ключ. Добавьте его в кабинете.`, 'provider_not_configured')
+      const model = body.model || prov.default_model || MODELS[prov.provider][0]
+      const run = newRun(doc, prov.provider, model, body.options ?? {})
+      logAudit('run.create', run.id, { provider: prov.provider, model })
       return HttpResponse.json(materialize(run), { status: 202 })
     }),
   ),
@@ -274,6 +307,7 @@ export const handlers = [
         r.status = 'cancelled'
         r.stage = 'cancelled'
         r.finished_at = new Date().toISOString()
+        r.message = 'Отменён пользователем'
         logAudit('run.cancel', r.id)
       }
       return HttpResponse.json(materialize(r))
@@ -294,10 +328,14 @@ export const handlers = [
     if (!authed()) return err(401, 'Not authenticated')
     const r = db.runs.find((x) => x.id === params.id)
     if (!r) return err(404, 'Run not found', 'not_found')
-    return sseStream((send, close) => {
+    return sseStream((send, close, raw) => {
       let last = ''
+      let ticks = 0
       let timer: ReturnType<typeof setTimeout>
+      raw('retry: 3000\n\n')
       const tick = () => {
+        // как бэкенд: периодический комментарий-keepalive
+        if (++ticks % 10 === 0) raw(': keepalive\n\n')
         const ev = progressOf(r)
         materialize(r)
         const key = `${ev.stage}:${ev.current ?? ''}`
@@ -316,7 +354,7 @@ export const handlers = [
     A('/runs/:id/report'),
     guard(({ params }: { params: Record<string, string> }) => {
       const rep = db.reports[params.id]
-      return rep ? HttpResponse.json(rep as unknown as JsonBodyType) : err(404, 'Report is not ready', 'report_not_ready')
+      return rep ? HttpResponse.json(rep as unknown as JsonBodyType) : err(404, 'Отчёт ещё не готов', 'report_not_ready')
     }),
   ),
   http.get(
@@ -360,11 +398,17 @@ export const handlers = [
     history.push({ id: uid('m'), role: 'user', content: message, created_at: new Date().toISOString() })
     const answer = chatAnswer(message, rep)
     const tokens = answer.match(/\S+\s*|\s+/g) ?? [answer]
+    // Демонстрация event: error — модель «падает» посреди ответа
+    const failAfter = /сломай|fail/i.test(message) ? 6 : Infinity
     const step = import.meta.env.MODE === 'test' ? 0 : 35
     return sseStream((send, close) => {
       let i = 0
       let timer: ReturnType<typeof setTimeout>
       const tick = () => {
+        if (i >= failAfter) {
+          send('error', { detail: 'Модель вернула ошибку 503, попробуйте ещё раз', code: 'chat_failed' })
+          return close()
+        }
         if (i < tokens.length) {
           send('token', { text: tokens[i++] })
           timer = setTimeout(tick, step)
@@ -386,11 +430,15 @@ export const handlers = [
     guard(({ params }: { params: Record<string, string> }) => {
       const m = /^report\.(md|pdf|docx|json)$/.exec(params.file)
       if (!m) return err(404, 'Not found')
-      if (!db.reports[params.id]) return err(404, 'Report is not ready', 'report_not_ready')
+      if (!db.reports[params.id]) return err(404, 'Отчёт ещё не готов', 'report_not_ready')
       const fmt = m[1] as ExportFormat
+      // Мок не рисует PDF/DOCX — отвечает так же, как бэкенд без поддержки формата в ядре
+      if (fmt === 'pdf' || fmt === 'docx')
+        return err(501, `Выгрузка в ${fmt.toUpperCase()} в демо-режиме недоступна`, 'render_unavailable')
       const { body, type } = exportBody(params.id, fmt)
+      const name = `${db.reports[params.id].passport.document_name.replace(/\.[^.]+$/, '')} — отчёт.${fmt}`
       return new HttpResponse(body, {
-        headers: { 'Content-Type': type, 'Content-Disposition': `attachment; filename="report-${params.id}.${fmt}"` },
+        headers: { 'Content-Type': type, 'Content-Disposition': contentDisposition(name) },
       })
     }),
   ),
@@ -451,14 +499,26 @@ export const handlers = [
       let size: number
       let source: 'upload' | 'manual'
       if (ct.includes('multipart/form-data')) {
-        const file = (await request.formData()).get('file')
-        if (!(file instanceof File)) return err(422, 'File is required')
-        title = file.name
+        const form = await request.formData()
+        const file = form.get('file')
+        if (!(file instanceof File)) return err(422, 'Некорректные данные: file: Field required', 'validation_error')
+        const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+        if (!['pdf', 'docx', 'md', 'txt'].includes(ext)) return err(415, 'Формат не поддерживается', 'unsupported_format')
+        if (file.size === 0) return err(400, 'Файл пустой', 'empty_file')
+        title = String(form.get('title') || file.name)
         size = file.size
         source = 'upload'
       } else {
         const body = (await request.json()) as { title: string; text: string }
-        if (!body.title || !body.text) return err(422, 'Title and text are required')
+        if (!body.title || !body.text)
+          return HttpResponse.json(
+            {
+              detail: `Некорректные данные: ${body.title ? 'text' : 'title'}: Field required`,
+              code: 'validation_error',
+              errors: [{ loc: ['body', body.title ? 'text' : 'title'], msg: 'Field required', type: 'missing' }],
+            },
+            { status: 422 },
+          )
         title = body.title
         size = body.text.length
         source = 'manual'
@@ -480,6 +540,9 @@ export const handlers = [
   http.delete(
     A('/knowledge/:id'),
     guard(({ params }: { params: Record<string, string> }) => {
+      const item = db.knowledge.find((k) => k.id === params.id)
+      if (!item) return err(404, 'Не найдено', 'not_found')
+      if (item.source === 'builtin') return err(409, 'Встроенный материал нельзя удалить', 'conflict')
       db.knowledge = db.knowledge.filter((k) => k.id !== params.id)
       logAudit('knowledge.delete', String(params.id))
       return new HttpResponse(null, { status: 204 })
@@ -488,24 +551,40 @@ export const handlers = [
 
   // ---------------- service
   http.get(A('/health'), () =>
-    HttpResponse.json({ status: 'ok', version: 'mock', checks: { postgres: 'ok', redis: 'ok', qdrant: 'ok', s3: 'ok', embedder: 'ok' } }),
+    HttpResponse.json({
+      status: 'degraded',
+      version: 'mock',
+      checks: { postgres: 'ok', redis: 'ok', qdrant: 'ok', s3: 'ok', embedder: 'error: демо-режим, эмбеддер не запущен' },
+      limits: { max_upload_mb: MAX_UPLOAD_MB },
+    }),
   ),
   http.get(
     A('/usage'),
-    guard(() => {
-      const by_day = Array.from({ length: 14 }, (_, i) => {
-        const d = new Date(Date.now() - (13 - i) * 86_400_000)
-        const calls = Math.round(4 + 10 * Math.abs(Math.sin(i * 1.7)))
+    guard(({ request }) => {
+      // как бэкенд: from/to — даты YYYY-MM-DD (UTC, включительно), по умолчанию последние 30 дней
+      const url = new URL(request.url)
+      const day = 86_400_000
+      const to = url.searchParams.get('to') ?? new Date().toISOString().slice(0, 10)
+      const from = url.searchParams.get('from') ?? new Date(Date.parse(to) - 29 * day).toISOString().slice(0, 10)
+      const days = Math.max(0, Math.min(366, Math.round((Date.parse(to) - Date.parse(from)) / day) + 1))
+      type K = 'runs' | 'llm_calls' | 'prompt_tokens' | 'completion_tokens' | 'cost_usd' | 'duration_s'
+      const keys: K[] = ['runs', 'llm_calls', 'prompt_tokens', 'completion_tokens', 'cost_usd', 'duration_s']
+      const by_day = Array.from({ length: days }, (_, i) => {
+        const t = Date.parse(from) + i * day
+        const runs = Math.round(1 + 4 * Math.abs(Math.sin(Math.floor(t / day) * 1.7)))
+        const calls = runs * 7
         return {
-          day: d.toISOString().slice(0, 10),
+          date: new Date(t).toISOString().slice(0, 10),
+          runs,
           llm_calls: calls,
           prompt_tokens: calls * 3400,
           completion_tokens: calls * 640,
           cost_usd: Math.round(calls * 0.0023 * 1000) / 1000,
+          duration_s: runs * 41.5,
         }
       })
-      const sum = (k: 'llm_calls' | 'prompt_tokens' | 'completion_tokens' | 'cost_usd') => by_day.reduce((s, d) => s + d[k], 0)
-      const totals = { llm_calls: sum('llm_calls'), prompt_tokens: sum('prompt_tokens'), completion_tokens: sum('completion_tokens'), cost_usd: Math.round(sum('cost_usd') * 1000) / 1000 }
+      const round = (n: number) => Math.round(n * 1000) / 1000
+      const totals = Object.fromEntries(keys.map((k) => [k, round(by_day.reduce((s, d) => s + d[k], 0))])) as Record<K, number>
       const share = [
         { provider: 'gemini', model: 'gemini-2.5-flash', k: 0.7 },
         { provider: 'openai', model: 'gpt-4.1-mini', k: 0.2 },
@@ -514,10 +593,8 @@ export const handlers = [
       const by_provider = share.map(({ provider, model, k }) => ({
         provider,
         model,
-        llm_calls: Math.round(totals.llm_calls * k),
-        prompt_tokens: Math.round(totals.prompt_tokens * k),
-        completion_tokens: Math.round(totals.completion_tokens * k),
-        cost_usd: provider === 'openai_compatible' ? 0 : Math.round(totals.cost_usd * k * 1000) / 1000,
+        ...(Object.fromEntries(keys.map((key) => [key, round(totals[key] * k)])) as Record<K, number>),
+        ...(provider === 'openai_compatible' ? { cost_usd: 0 } : {}),
       }))
       return HttpResponse.json({ totals, by_provider, by_day })
     }),

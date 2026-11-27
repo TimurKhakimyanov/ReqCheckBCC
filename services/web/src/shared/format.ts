@@ -1,3 +1,4 @@
+import { toError } from '@/api/client'
 import i18n from '@/i18n'
 
 const locale = () => {
@@ -50,10 +51,9 @@ export function formatDuration(s?: number | null) {
 /** Скачивание через fetch: работает с cookie-сессией и с MSW (навигационные запросы моки не перехватывают). */
 export async function downloadFile(url: string, fallbackName: string) {
   const res = await fetch(url, { credentials: 'same-origin' })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  const cd = res.headers.get('content-disposition') ?? ''
-  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd)
-  const name = m ? decodeURIComponent(m[1]) : fallbackName
+  // 501 render_unavailable и прочие ошибки — с текстом от API
+  if (!res.ok) throw await toError(res)
+  const name = filenameFromDisposition(res.headers.get('content-disposition')) ?? fallbackName
   const blob = await res.blob()
   const href = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -63,4 +63,19 @@ export async function downloadFile(url: string, fallbackName: string) {
   a.click()
   a.remove()
   setTimeout(() => URL.revokeObjectURL(href), 1000)
+}
+
+/** Имя файла из Content-Disposition: filename* (RFC 5987, UTF-8) важнее ASCII-запасного filename. */
+export function filenameFromDisposition(cd: string | null): string | null {
+  if (!cd) return null
+  const star = /filename\*\s*=\s*(?:UTF-8|utf-8)?'[^']*'([^;]+)/i.exec(cd)
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim().replace(/^"|"$/g, ''))
+    } catch {
+      /* битое кодирование — пробуем filename */
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(cd)
+  return plain ? plain[1].trim() : null
 }

@@ -58,6 +58,7 @@ export interface Db {
   chats: Record<string, ChatMessage[]>
   knowledge: (KnowledgeItem & { _readyAt?: number })[]
   audit: AuditEntry[]
+  auditSeq: number
 }
 
 const SESSION_KEY = 'reqcheck.mock.session'
@@ -110,7 +111,8 @@ function seed(): Db {
     created_at: ago(200),
     started_at: ago(200),
     finished_at: ago(199),
-    error: 'Provider returned 401: invalid API key',
+    error: 'Провайдер отклонил ключ (401). Проверьте API-ключ в кабинете.',
+    message: 'Провайдер отклонил ключ (401). Проверьте API-ключ в кабинете.',
     usage: { llm_calls: 3, prompt_tokens: 5100, completion_tokens: 0, cost_usd: 0.002, duration_s: 8.1 },
     summary: null,
   }
@@ -122,7 +124,7 @@ function seed(): Db {
     sha256: sampleReport.passport.document_sha256,
     created_at: ago(240),
     runs_count: 2,
-    last_run: { id: runId, status: 'done', created_at: sampleRun.created_at, provider: 'gemini', model: 'gemini-2.5-flash', summary: sampleRun.summary },
+    last_run: { id: runId, status: 'done', progress: 1, created_at: sampleRun.created_at, finished_at: sampleRun.finished_at, summary: sampleRun.summary },
   }
   const report: Report = {
     ...sampleReport,
@@ -152,13 +154,15 @@ function seed(): Db {
     knowledge: [
       { id: 'kb-builtin', title: 'Критерии ISO/IEC/IEEE 29148 и IEEE 830 (пересказ)', source: 'builtin', chunks: 36, status: 'ready', created_at: ago(500) },
       { id: 'kb-glossary', title: 'Глоссарий банка', source: 'upload', chunks: 12, status: 'ready', created_at: ago(400) },
+      { id: 'kb-scan', title: 'Шаблон ТЗ (скан).pdf', source: 'upload', chunks: 0, status: 'failed', created_at: ago(380), error: 'В PDF нет текстового слоя — нужен OCR' },
     ],
     audit: [
-      { id: uid('a'), ts: ago(240), actor: 'admin', action: 'document.upload', target: docId, details: { name: doc.name } },
-      { id: uid('a'), ts: ago(200), actor: 'admin', action: 'run.create', target: 'run-failed', details: { provider: 'openai' } },
-      { id: uid('a'), ts: ago(95), actor: 'admin', action: 'run.create', target: runId, details: { provider: 'gemini' } },
-      { id: uid('a'), ts: ago(60), actor: 'admin', action: 'finding.review', target: `${runId}/D-003`, details: { status: 'accepted' } },
-    ].reverse(),
+      { id: 4, ts: ago(60), actor: 'admin', action: 'finding.review', target: `${runId}/D-003`, details: { status: 'accepted' } },
+      { id: 3, ts: ago(95), actor: 'admin', action: 'run.create', target: runId, details: { provider: 'gemini' } },
+      { id: 2, ts: ago(200), actor: 'admin', action: 'run.create', target: 'run-failed', details: { provider: 'openai' } },
+      { id: 1, ts: ago(240), actor: 'admin', action: 'document.upload', target: docId, details: { name: doc.name } },
+    ],
+    auditSeq: 4,
   }
 }
 
@@ -168,13 +172,13 @@ export function resetDb() {
 }
 
 export function logAudit(action: string, target: string | null, details: Record<string, unknown> = {}) {
-  db.audit.unshift({ id: uid('a'), ts: now(), actor: db.user.username, action, target, details })
+  db.audit.unshift({ id: ++db.auditSeq, ts: now(), actor: db.user.username, action, target, details })
 }
 
 /** Текущее состояние прогона по прошедшему времени (имитация воркера). */
 export function progressOf(run: MockRun): ProgressEvent {
   if (run.status === 'done' || run.status === 'failed' || run.status === 'cancelled') {
-    return { run_id: run.id, stage: run.status, progress: run.progress, message: run.error ?? '', ts: run.finished_at ?? now() }
+    return { run_id: run.id, stage: run.status, progress: run.progress, message: run.error ?? run.message ?? '', ts: run.finished_at ?? now() }
   }
   const elapsed = Date.now() - run._startedAtMs
   let acc = 0
@@ -208,6 +212,7 @@ function finish(run: MockRun, status: 'done' | 'failed', error?: string): Progre
   run.finished_at = now()
   run.progress = status === 'done' ? 1 : run.progress
   run.error = error ?? null
+  run.message = error ?? (status === 'done' ? 'Готово' : '')
   run.usage = { llm_calls: 12, prompt_tokens: 41000, completion_tokens: 8300, cost_usd: 0.027, duration_s: TOTAL_MS / 1000 }
   if (status === 'done') {
     run.summary = { ...sampleReport.summary, ready_for_development: sampleReport.conclusion.ready_for_development }
@@ -218,7 +223,7 @@ function finish(run: MockRun, status: 'done' | 'failed', error?: string): Progre
     }
   }
   const doc = db.documents.find((d) => d.id === run.document_id)
-  if (doc) doc.last_run = { id: run.id, status, created_at: run.created_at, provider: run.provider, model: run.model, summary: run.summary }
+  if (doc) doc.last_run = { id: run.id, status, progress: run.progress, created_at: run.created_at, finished_at: run.finished_at, summary: run.summary }
   logAudit(`run.${status}`, run.id)
   return { run_id: run.id, stage: status, progress: run.progress, message: error ?? '', ts: now() }
 }
@@ -229,6 +234,7 @@ export function materialize(run: MockRun): Run {
     run.status = ev.stage
     run.stage = ev.stage
     run.progress = ev.progress
+    run.message = ev.message
     if (ev.stage !== 'queued' && !run.started_at) run.started_at = now()
   }
   const { _startedAtMs, _cancelled, _failAt, ...pub } = run
@@ -246,6 +252,7 @@ export function newRun(doc: DocumentItem, provider: string, model: string, optio
     status: 'queued',
     stage: 'queued',
     progress: 0,
+    message: 'В очереди',
     provider,
     model,
     options,
@@ -255,7 +262,7 @@ export function newRun(doc: DocumentItem, provider: string, model: string, optio
   }
   db.runs.unshift(run)
   doc.runs_count += 1
-  doc.last_run = { id: run.id, status: 'queued', created_at: run.created_at, provider, model }
+  doc.last_run = { id: run.id, status: 'queued', progress: 0, created_at: run.created_at }
   return run
 }
 

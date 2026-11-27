@@ -53,7 +53,8 @@ export function UsagePage() {
         <Skeleton className="h-64" />
       ) : (
         <div className="grid gap-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Stat label={t('usage.runs')} value={formatNumber(u.totals.runs)} />
             <Stat label={t('usage.calls')} value={formatNumber(u.totals.llm_calls)} />
             <Stat label={t('usage.promptTokens')} value={formatNumber(u.totals.prompt_tokens)} />
             <Stat label={t('usage.completionTokens')} value={formatNumber(u.totals.completion_tokens)} />
@@ -70,9 +71,9 @@ export function UsagePage() {
                   const c = d.completion_tokens ?? 0
                   return (
                     <div
-                      key={d.day}
+                      key={d.date}
                       className="group relative flex h-full flex-1 flex-col justify-end"
-                      title={`${d.day}: ${formatNumber(p + c)} ${t('usage.tokens')} · ${formatUsd(d.cost_usd)}`}
+                      title={`${d.date}: ${formatNumber(p + c)} ${t('usage.tokens')} · ${formatUsd(d.cost_usd)}${d.runs !== undefined ? ` · ${t('usage.runs')}: ${d.runs}` : ''}`}
                     >
                       <div className="rounded-t-sm bg-primary/40" style={{ height: `${(c / maxTokens) * 100}%` }} />
                       <div className="bg-primary" style={{ height: `${(p / maxTokens) * 100}%` }} />
@@ -81,7 +82,7 @@ export function UsagePage() {
                 })}
               </div>
               <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-                <span>{u.by_day[0]?.day}</span>
+                <span>{u.by_day[0]?.date}</span>
                 <span className="flex gap-3">
                   <span className="flex items-center gap-1">
                     <span className="size-2 rounded-sm bg-primary" />
@@ -92,7 +93,7 @@ export function UsagePage() {
                     {t('usage.completionTokens')}
                   </span>
                 </span>
-                <span>{u.by_day.at(-1)?.day}</span>
+                <span>{u.by_day.at(-1)?.date}</span>
               </div>
             </CardContent>
           </Card>
@@ -105,6 +106,7 @@ export function UsagePage() {
                 <TR>
                   <TH>{t('launch.provider')}</TH>
                   <TH>{t('launch.model')}</TH>
+                  <TH className="text-right">{t('usage.runs')}</TH>
                   <TH className="text-right">{t('usage.calls')}</TH>
                   <TH className="text-right">{t('usage.promptTokens')}</TH>
                   <TH className="text-right">{t('usage.completionTokens')}</TH>
@@ -116,6 +118,7 @@ export function UsagePage() {
                   <TR key={i}>
                     <TD>{t(`provider.${p.provider}`, { defaultValue: p.provider })}</TD>
                     <TD className="font-mono text-xs">{p.model ?? '—'}</TD>
+                    <TD className="text-right tabular-nums">{formatNumber(p.runs)}</TD>
                     <TD className="text-right tabular-nums">{formatNumber(p.llm_calls)}</TD>
                     <TD className="text-right tabular-nums">{formatNumber(p.prompt_tokens)}</TD>
                     <TD className="text-right tabular-nums">{formatNumber(p.completion_tokens)}</TD>

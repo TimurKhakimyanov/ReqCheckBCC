@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileUp } from 'lucide-react'
 import { useRef, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -10,13 +10,19 @@ import { formatBytes } from '@/shared/format'
 import { cn } from '@/shared/utils'
 
 export const ACCEPTED_EXT = ['pdf', 'docx', 'md', 'txt']
-export const MAX_UPLOAD_MB = 25
+export const DEFAULT_MAX_UPLOAD_MB = 25
 
-export function validateFile(file: File): 'format' | 'size' | null {
+export function validateFile(file: File, maxMb = DEFAULT_MAX_UPLOAD_MB): 'format' | 'size' | null {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
   if (!ACCEPTED_EXT.includes(ext)) return 'format'
-  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return 'size'
+  if (file.size > maxMb * 1024 * 1024) return 'size'
   return null
+}
+
+/** Лимит загрузки из GET /health (limits.max_upload_mb), иначе 25 МБ. */
+export function useMaxUploadMb() {
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 5 * 60_000, retry: false })
+  return health.data?.limits?.max_upload_mb ?? DEFAULT_MAX_UPLOAD_MB
 }
 
 interface Item {
@@ -31,12 +37,13 @@ export function UploadDropzone({ onUploaded }: { onUploaded?: (doc: DocumentItem
   const input = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
   const [items, setItems] = useState<Item[]>([])
+  const maxMb = useMaxUploadMb()
 
   const uploadAll = async (files: File[]) => {
     for (const file of files) {
-      const problem = validateFile(file)
+      const problem = validateFile(file, maxMb)
       if (problem) {
-        toast.error(t(problem === 'format' ? 'upload.badFormat' : 'upload.tooLarge', { name: file.name, mb: MAX_UPLOAD_MB }))
+        toast.error(t(problem === 'format' ? 'upload.badFormat' : 'upload.tooLarge', { name: file.name, mb: maxMb }))
         continue
       }
       setItems((xs) => [...xs, { name: file.name, size: file.size, pct: 0 }])
@@ -83,7 +90,7 @@ export function UploadDropzone({ onUploaded }: { onUploaded?: (doc: DocumentItem
       >
         <FileUp className="size-8 text-muted-foreground" />
         <p className="font-medium">{t('upload.title')}</p>
-        <p className="text-sm text-muted-foreground">{t('upload.hint', { mb: MAX_UPLOAD_MB })}</p>
+        <p className="text-sm text-muted-foreground">{t('upload.hint', { mb: maxMb })}</p>
         <input
           ref={input}
           type="file"

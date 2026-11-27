@@ -66,9 +66,10 @@ export function LaunchRunDialog({
 
   const models = useModels(provider)
   const current = usable.find((p) => p.provider === provider)
+  const modelList = models.data?.models ?? []
   useEffect(() => {
-    if (!models.data?.length) return
-    if (!model || !models.data.includes(model)) setModel(current?.default_model && models.data.includes(current.default_model) ? current.default_model : models.data[0])
+    if (!modelList.length) return
+    if (!model || !modelList.includes(model)) setModel(current?.default_model && modelList.includes(current.default_model) ? current.default_model : modelList[0])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [models.data])
 
@@ -152,13 +153,18 @@ export function LaunchRunDialog({
                 <Label htmlFor="model">{t('launch.model')}</Label>
                 <NativeSelect id="model" value={model} onChange={(e) => setModel(e.target.value)} disabled={models.isPending}>
                   {models.isPending && <option>{t('common.loading')}</option>}
-                  {models.data?.map((m) => (
+                  {modelList.map((m) => (
                     <option key={m} value={m}>
                       {m}
                     </option>
                   ))}
-                  {model && models.data && !models.data.includes(model) && <option value={model}>{model}</option>}
+                  {model && models.data && !modelList.includes(model) && <option value={model}>{model}</option>}
                 </NativeSelect>
+                {models.data?.error && (
+                  <span className="text-xs text-muted-foreground" title={models.data.error}>
+                    {t('launch.modelsHint')}
+                  </span>
+                )}
               </div>
             </div>
             {noKey && (

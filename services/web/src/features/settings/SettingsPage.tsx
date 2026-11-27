@@ -91,13 +91,18 @@ function ProviderCard({ p }: { p: ProviderSettings }) {
           <div className="grid gap-1.5">
             <Label htmlFor={`model-${p.provider}`}>{t('settings.defaultModel')}</Label>
             <NativeSelect id={`model-${p.provider}`} value={model} onChange={(e) => setModel(e.target.value)}>
-              {!models.data?.includes(model) && <option value={model}>{model || '—'}</option>}
-              {models.data?.map((m) => (
+              {!models.data?.models.includes(model) && <option value={model}>{model || '—'}</option>}
+              {models.data?.models.map((m) => (
                 <option key={m} value={m}>
                   {m}
                 </option>
               ))}
             </NativeSelect>
+            {models.data?.error && (
+              <span className="text-xs text-muted-foreground" title={models.data.error}>
+                {t('launch.modelsHint')}
+              </span>
+            )}
           </div>
           {test && (
             <div className={`rounded-md px-3 py-2 text-sm ${test.ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}>

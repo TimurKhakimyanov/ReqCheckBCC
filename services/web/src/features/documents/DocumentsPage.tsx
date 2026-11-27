@@ -77,7 +77,9 @@ export function DocumentsPage() {
                     {d.last_run ? (
                       <Link to={`/runs/${d.last_run.id}`} className="inline-flex flex-col gap-1 hover:opacity-80">
                         <RunStatusBadge status={d.last_run.status} />
-                        <span className="text-xs text-muted-foreground">{d.last_run.model}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {d.last_run.model ?? formatRelative(d.last_run.finished_at ?? d.last_run.created_at)}
+                        </span>
                       </Link>
                     ) : (
                       <span className="text-muted-foreground">—</span>

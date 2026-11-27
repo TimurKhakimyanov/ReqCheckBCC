@@ -83,9 +83,12 @@ export type DocumentFormat = 'pdf' | 'docx' | 'md' | 'txt'
 export interface RunShort {
   id: string
   status: RunStage
+  progress?: number
   created_at: string
-  provider: string
-  model: string
+  finished_at?: string | null
+  /** Бэкенд в RunShort их не отдаёт — есть только в полном Run. */
+  provider?: string
+  model?: string
   summary?: RunSummary | null
 }
 
@@ -130,6 +133,8 @@ export interface Run {
   status: RunStage
   stage: RunStage
   progress: number
+  /** Текст последнего события прогресса; для failed совпадает с error. */
+  message?: string
   provider: string
   model: string
   options: ValidationOptions
@@ -143,8 +148,9 @@ export interface Run {
 
 export interface RunCreate {
   document_id: string
-  provider: string
-  model: string
+  /** Необязательны: бэкенд берёт провайдер по умолчанию и его default_model. */
+  provider?: string
+  model?: string
   options?: ValidationOptions
 }
 
@@ -197,25 +203,31 @@ export interface KnowledgeItem {
   chunks: number
   status: 'indexing' | 'ready' | 'failed'
   created_at: string
+  error?: string | null
 }
 
-export interface UsageByProvider extends Usage {
+export interface UsageRow extends Usage {
+  runs?: number
+}
+
+export interface UsageByProvider extends UsageRow {
   provider: string
   model?: string | null
 }
 
-export interface UsageByDay extends Usage {
-  day: string
+export interface UsageByDay extends UsageRow {
+  /** YYYY-MM-DD (UTC) */
+  date: string
 }
 
 export interface UsageResponse {
-  totals: Usage
+  totals: UsageRow
   by_provider: UsageByProvider[]
   by_day: UsageByDay[]
 }
 
 export interface AuditEntry {
-  id: string
+  id: string | number
   ts: string
   actor: string
   action: string
@@ -229,9 +241,17 @@ export interface Page<T> {
 }
 
 export interface Health {
-  status: string
+  status: 'ok' | 'degraded'
   version: string
-  checks: Record<string, string | boolean>
+  /** "ok" или текст ошибки */
+  checks: Record<string, string>
+  limits?: { max_upload_mb?: number }
+}
+
+export interface ModelsResponse {
+  models: string[]
+  /** Провайдер недоступен — models содержит список-подсказку. */
+  error?: string | null
 }
 
 export type ExportFormat = 'md' | 'pdf' | 'docx' | 'json'

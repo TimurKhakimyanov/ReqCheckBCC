@@ -98,6 +98,7 @@ export function KnowledgePage() {
                       {k.status === 'indexing' && <Spinner className="size-3" />}
                       {t(`knowledge.st.${k.status}`)}
                     </Badge>
+                    {k.status === 'failed' && k.error && <div className="mt-1 max-w-64 text-xs text-destructive">{k.error}</div>}
                   </TD>
                   <TD className="whitespace-nowrap text-muted-foreground">{formatDate(k.created_at)}</TD>
                   <TD>

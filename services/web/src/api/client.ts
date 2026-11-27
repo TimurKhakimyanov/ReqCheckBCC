@@ -9,6 +9,7 @@ import type {
   FindingWithReview,
   Health,
   KnowledgeItem,
+  ModelsResponse,
   Page,
   ProviderId,
   ProviderSettings,
@@ -25,14 +26,23 @@ import type {
 
 export const API_BASE = '/api'
 
+export interface FieldError {
+  loc?: (string | number)[]
+  msg?: string
+  type?: string
+}
+
 export class ApiError extends Error {
   status: number
   code?: string
-  constructor(status: number, message: string, code?: string) {
+  /** 422: ошибки валидации по полям (формат FastAPI) */
+  errors?: FieldError[]
+  constructor(status: number, message: string, code?: string, errors?: FieldError[]) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.errors = errors
   }
 }
 
@@ -42,18 +52,20 @@ export function onUnauthorized(fn: (() => void) | null) {
   unauthorizedHandler = fn
 }
 
-async function toError(res: Response): Promise<ApiError> {
+export async function toError(res: Response): Promise<ApiError> {
   let message = `${res.status} ${res.statusText}`
   let code: string | undefined
+  let errors: FieldError[] | undefined
   try {
     const body = await res.json()
     if (typeof body?.detail === 'string') message = body.detail
-    else if (Array.isArray(body?.detail)) message = body.detail.map((d: { msg?: string }) => d.msg).join('; ')
+    else if (Array.isArray(body?.detail)) message = body.detail.map((d: FieldError) => d.msg).join('; ')
     code = body?.code
+    if (Array.isArray(body?.errors)) errors = body.errors
   } catch {
     /* тело не JSON */
   }
-  return new ApiError(res.status, message, code)
+  return new ApiError(res.status, message, code, errors)
 }
 
 export async function request<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
@@ -128,7 +140,7 @@ export const api = {
   updateProvider: (p: ProviderId, body: ProviderUpdate) =>
     request<ProviderSettings>(`/providers/${p}`, { method: 'PUT', json: body }),
   testProvider: (p: ProviderId) => request<ProviderTestResult>(`/providers/${p}/test`, { method: 'POST' }),
-  models: (p: ProviderId) => request<{ models: string[] }>(`/providers/${p}/models`).then((r) => r.models),
+  models: (p: ProviderId) => request<ModelsResponse>(`/providers/${p}/models`),
 
   // --- documents
   documents: (params: { limit?: number; offset?: number; q?: string } = {}) =>

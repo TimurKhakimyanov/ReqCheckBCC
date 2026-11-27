@@ -32,6 +32,7 @@ export function RunProgress({ run }: { run: Run }) {
 
   const stage: RunStage = latest?.stage ?? run.stage ?? run.status
   const progress = latest?.progress ?? run.progress ?? 0
+  const message = latest?.message || run.message
   const failed = stage === 'failed' || stage === 'cancelled'
   const currentIdx = PIPELINE_STAGES.indexOf(stage)
   // для упавшего прогона — последняя достигнутая стадия
@@ -83,12 +84,12 @@ export function RunProgress({ run }: { run: Run }) {
               <span className="font-medium tabular-nums">{Math.round(progress * 100)}%</span>
             </div>
             <Progress value={progress * 100} className={cn(failed && '[&>div]:bg-destructive')} />
-            {latest?.message && <p className="text-sm text-muted-foreground">{latest.message}</p>}
+            {message && !failed && <p className="text-sm text-muted-foreground">{message}</p>}
           </div>
 
-          {(run.error || (failed && latest?.message)) && (
+          {failed && (run.error || message) && (
             <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-              {run.error || latest?.message}
+              {run.error || message}
             </div>
           )}
 
