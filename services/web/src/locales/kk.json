@@ -1,0 +1,36 @@
+{
+  "_meta": { "name": "Қазақша", "ready": false },
+  "nav": {
+    "documents": "Құжаттар",
+    "search": "Іздеу",
+    "knowledge": "Білім қоры",
+    "usage": "Токен шығыны",
+    "audit": "Аудит журналы",
+    "settings": "Жеке кабинет",
+    "menu": "Мәзір"
+  },
+  "common": {
+    "cancel": "Болдырмау",
+    "save": "Сақтау",
+    "delete": "Жою",
+    "close": "Жабу"
+  },
+  "prefs": {
+    "language": "Тіл",
+    "theme": "Тақырып",
+    "light": "Ашық",
+    "dark": "Қараңғы",
+    "system": "Жүйедегідей"
+  },
+  "auth": {
+    "username": "Логин",
+    "password": "Құпиясөз",
+    "signIn": "Кіру",
+    "signOut": "Шығу"
+  },
+  "severity": {
+    "critical": "Сыни",
+    "major": "Елеулі",
+    "minor": "Елеусіз"
+  }
+}

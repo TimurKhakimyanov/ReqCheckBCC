@@ -1,0 +1,64 @@
+{
+  "name": "@reqcheck/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "typecheck": "tsc -b --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "gen:types": "json2ts -i ../../packages/contracts/req_contracts/fixtures/report.schema.json --additionalProperties false --bannerComment \"/* Generated from packages/contracts/req_contracts/fixtures/report.schema.json by pnpm gen:types. Do not edit. */\" -o src/api/report.gen.ts",
+    "check:types-gen": "json2ts -i ../../packages/contracts/req_contracts/fixtures/report.schema.json --additionalProperties false --bannerComment \"/* Generated from packages/contracts/req_contracts/fixtures/report.schema.json by pnpm gen:types. Do not edit. */\" -o /tmp/report.gen.ts && diff -q /tmp/report.gen.ts src/api/report.gen.ts"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.80.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "i18next": "^25.2.1",
+    "lucide-react": "^0.511.0",
+    "radix-ui": "^1.4.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-i18next": "^15.5.2",
+    "react-router": "^7.6.1",
+    "sonner": "^2.0.5",
+    "tailwind-merge": "^3.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "@tailwindcss/vite": "^4.1.8",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.15.29",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "@vitejs/plugin-react": "^4.5.0",
+    "eslint": "^9.28.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.2.0",
+    "jsdom": "^26.1.0",
+    "json-schema-to-typescript": "^15.0.4",
+    "msw": "^2.8.7",
+    "tailwindcss": "^4.1.8",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.33.0",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "msw"
+    ]
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
+  }
+}
