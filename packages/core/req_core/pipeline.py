@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import threading
@@ -338,18 +339,25 @@ class Pipeline:
                         c for c in item.not_applicable if c in REQUIREMENT_CRITERIA)
         return issues, na
 
+    def _set_review_body(self):
+        """На проверке набора — cfg.extra_body_set_review (напр. включить рассуждения для поиска противоречий)."""
+        body = getattr(getattr(self.client, "cfg", None), "extra_body_set_review", None)
+        use = getattr(self.client, "use_extra_body", None)
+        return use(body) if use and body is not None else contextlib.nullcontext()
+
     def check_set(self, drafts: list[ReqDraft], known: list[FindingDraft], ids: set[str]
                   ) -> tuple[list[FindingDraft], dict[Criterion, Any]]:
         doc = prompts.doc_block(self.text, self.s.context_chars)
         reqs = self.reqs_list(drafts)
-        self.progress(RunStage.CHECKING_SET, 0.72, "Проверка согласованности набора")
-        cons = self.ask(prompts.SET_CONSISTENCY_TASK.format(
-            known=self.known_block([f for f in known if f.scope == FindingScope.SET]), reqs=reqs, doc=doc),
-            SetConsistencyResult, "проверка согласованности набора")
-        self.progress(RunStage.CHECKING_SET, 0.8, "Проверка полноты набора")
-        rev = self.ask(prompts.SET_REVIEW_TASK.format(
-            criteria=prompts.set_criteria_block(), known=self.known_block(known), reqs=reqs, doc=doc),
-            SetReviewResult, "проверка полноты набора")
+        with self._set_review_body():
+            self.progress(RunStage.CHECKING_SET, 0.72, "Проверка согласованности набора")
+            cons = self.ask(prompts.SET_CONSISTENCY_TASK.format(
+                known=self.known_block([f for f in known if f.scope == FindingScope.SET]), reqs=reqs, doc=doc),
+                SetConsistencyResult, "проверка согласованности набора")
+            self.progress(RunStage.CHECKING_SET, 0.8, "Проверка полноты набора")
+            rev = self.ask(prompts.SET_REVIEW_TASK.format(
+                criteria=prompts.set_criteria_block(), known=self.known_block(known), reqs=reqs, doc=doc),
+                SetReviewResult, "проверка полноты набора")
         out: list[FindingDraft] = []
         checks: dict[Criterion, Any] = {}
         if cons:

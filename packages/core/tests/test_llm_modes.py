@@ -299,3 +299,64 @@ def test_core_ignores_llm_environment(monkeypatch):
     assert str(c.client.base_url).startswith(VLLM)
     with pytest.raises(L.LLMConfigError):
         L.GeminiLLM(ProviderConfig(provider=ProviderName.GEMINI, model="m"))  # ключ из окружения не берётся
+
+
+# ---------------------------------------------------------------- extra_body (vLLM chat_template_kwargs)
+
+THINK_OFF = {"chat_template_kwargs": {"enable_thinking": False}}
+THINK_ON = {"chat_template_kwargs": {"enable_thinking": True}}
+
+
+class EchoCompletions:
+    """Отвечает «{}» на любой запрос (все LLM-схемы допускают пустой объект) и запоминает запросы."""
+
+    def __init__(self):
+        self.calls = []
+
+    def create(self, **kw):
+        self.calls.append(kw)
+        return ochoice("{}")
+
+
+def test_extra_body_everywhere_and_set_review_override(sample_path):
+    from req_core import parse_document
+    from req_core.pipeline import run_pipeline
+    from req_contracts import ValidationOptions
+
+    c = L.OpenAILLM(ProviderConfig(provider=ProviderName.OPENAI_COMPATIBLE, model="mimo", base_url=VLLM,
+                                   max_output_tokens=48_000, extra_body=THINK_OFF, extra_body_set_review=THINK_ON))
+    echo = EchoCompletions()
+    c.client = NS(chat=NS(completions=echo), models=NS(list=lambda: []))
+    run_pipeline(parse_document(sample_path), c, options=ValidationOptions(concurrency=4, batch_size=3))
+
+    def is_set(kw):
+        u = kw["messages"][-1]["content"]
+        return "найди противоречия" in u or "оцени набор требований целиком" in u
+
+    set_calls = [k for k in echo.calls if is_set(k)]
+    other = [k for k in echo.calls if not is_set(k)]
+    assert len(set_calls) == 2 and other
+    assert all(k["extra_body"] == THINK_ON for k in set_calls)
+    assert all(k["extra_body"] == THINK_OFF for k in other)
+    assert all(k["max_tokens"] == 48_000 for k in echo.calls)
+    assert c.extra_body == THINK_OFF  # после проверки набора — вернулся исходный
+
+
+def test_anthropic_extra_body_merged_with_output_config():
+    c = L.AnthropicLLM(cfg(ProviderName.ANTHROPIC, "claude-opus-5-5", extra_body={"output_config": {"effort": "high"}}))
+    c.client = FakeAnthropic([amsg(text_block(json.dumps(GOOD)))])
+    c.complete_json("s", "u", ConclusionResult)
+    oc = c.client.calls[0]["extra_body"]["output_config"]
+    assert oc["effort"] == "high" and oc["format"]["type"] == "json_schema"
+
+
+def test_cli_extra_body_and_max_tokens_flags():
+    p = build_parser()
+    args = p.parse_args(["in.md", "out.md", "--provider", "openai_compatible", "--base-url", VLLM, "--model", "m",
+                         "--extra-body", json.dumps(THINK_OFF), "--extra-body-set-review", json.dumps(THINK_ON),
+                         "--max-tokens", "48000", "--concurrency", "4"])
+    c = _provider_config(args)
+    assert c.extra_body == THINK_OFF and c.extra_body_set_review == THINK_ON and c.max_output_tokens == 48000
+    assert args.concurrency == 4
+    with pytest.raises(SystemExit):
+        p.parse_args(["in.md", "out.md", "--extra-body", "[1, 2]"])

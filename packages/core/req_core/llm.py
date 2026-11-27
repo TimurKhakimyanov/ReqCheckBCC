@@ -223,6 +223,34 @@ class BaseLLM:
         self.sleep: Callable[[float], None] = time.sleep
         # Вызывается перед каждым отрезком паузы (≤5 с) при повторе; исключение из него прерывает вызов.
         self.on_wait: Callable[[str], None] | None = None
+        # Доп. поля тела запроса (OpenAI SDK / Anthropic SDK `extra_body`), напр. chat_template_kwargs у vLLM.
+        # Конвейер на время проверки набора подменяет его на cfg.extra_body_set_review (см. use_extra_body).
+        self.extra_body: dict[str, Any] | None = getattr(cfg, "extra_body", None)
+
+    def use_extra_body(self, body: dict[str, Any] | None):
+        """Контекст: временно другой extra_body (None — не менять)."""
+        client = self
+
+        class _Ctx:
+            def __enter__(self):
+                self.prev = client.extra_body
+                if body is not None:
+                    client.extra_body = body
+                return client
+
+            def __exit__(self, *exc):
+                client.extra_body = self.prev
+                return False
+
+        return _Ctx()
+
+    def _merged_extra(self, own: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        if not self.extra_body and not own:
+            return None
+        out = dict(self.extra_body or {})
+        for k, v in (own or {}).items():
+            out[k] = {**out[k], **v} if isinstance(out.get(k), dict) and isinstance(v, dict) else v
+        return out
 
     # --- реализуют провайдеры
     def _call(self, system: str, messages: list[dict[str, str]], schema: tuple[str, dict] | None,
@@ -554,6 +582,9 @@ class OpenAILLM(BaseLLM):
             else:
                 sys_text = system + schema_instruction(schema[1])
         kw["messages"] = [{"role": "system", "content": sys_text}, *messages]
+        extra = self._merged_extra()
+        if extra:
+            kw["extra_body"] = extra
         return kw
 
     def _create(self, **kw):
@@ -627,6 +658,9 @@ class AnthropicLLM(BaseLLM):
         }
         if self._use_temperature:
             kw["temperature"] = self.cfg.temperature
+        extra = self._merged_extra()
+        if extra:
+            kw["extra_body"] = extra
         return kw
 
     def _request(self, kw: dict[str, Any]):
@@ -639,7 +673,8 @@ class AnthropicLLM(BaseLLM):
         if schema:
             strict = inline_schema_strict(schema)
             if mode == "native":
-                kw["extra_body"] = {"output_config": {"format": {"type": "json_schema", "schema": strict}}}
+                kw["extra_body"] = self._merged_extra(
+                    {"output_config": {"format": {"type": "json_schema", "schema": strict}}})
             elif mode == "tool":
                 kw["tools"] = [{"name": TOOL_NAME, "description": "Передать результат строго по схеме.",
                                 "input_schema": strict}]

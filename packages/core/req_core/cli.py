@@ -11,6 +11,7 @@ OPENAI_COMPATIBLE_BASE_URL, LLM_PROVIDER, LLM_MODEL). Файл .env для LLM �
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -26,6 +27,16 @@ KEY_ENV: dict[ProviderName, tuple[str, ...]] = {
     ProviderName.ANTHROPIC: ("ANTHROPIC_API_KEY",),
     ProviderName.OPENAI_COMPATIBLE: ("OPENAI_COMPATIBLE_API_KEY",),
 }
+
+
+def _json_obj(s: str) -> dict:
+    try:
+        v = json.loads(s)
+    except json.JSONDecodeError as e:
+        raise argparse.ArgumentTypeError(f"некорректный JSON: {e}") from e
+    if not isinstance(v, dict):
+        raise argparse.ArgumentTypeError("ожидается JSON-объект {…}")
+    return v
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,7 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-checklist", action="store_true", help="не заполнять чек-лист «Ревью требований»")
     p.add_argument("--api-key", default=None, help="ключ провайдера (иначе — переменная окружения провайдера)")
     p.add_argument("--base-url", default=None, help="адрес API: обязателен для openai_compatible (vLLM, Ollama: …/v1)")
-    p.add_argument("--max-output-tokens", type=int, default=None, help="лимит ответа (по умолчанию — с запасом)")
+    p.add_argument("--max-tokens", "--max-output-tokens", dest="max_output_tokens", type=int, default=None,
+                   help="лимит ответа модели, токенов (по умолчанию — с запасом)")
+    p.add_argument("--extra-body", type=_json_obj, default=None,
+                   help='доп. поля тела запроса (JSON), напр. \'{"chat_template_kwargs":{"enable_thinking":false}}\'')
+    p.add_argument("--extra-body-set-review", type=_json_obj, default=None,
+                   help="extra_body для проверки набора (JSON); по умолчанию — как --extra-body")
     p.add_argument("--timeout", type=float, default=None, help="таймаут запроса, с (по умолчанию 180)")
     p.add_argument("--min-interval", type=float, default=None, help="пауза между запросами, с (бесплатные тарифы)")
     p.add_argument("--max-attempts", type=int, default=None, help="попыток на запрос при 429/5xx (по умолчанию 6)")
@@ -76,6 +92,7 @@ def _provider_config(args: argparse.Namespace) -> ProviderConfig | None:
     extra = {k: v for k, v in {
         "max_output_tokens": args.max_output_tokens, "timeout_s": args.timeout,
         "min_interval_s": args.min_interval, "max_attempts": args.max_attempts,
+        "extra_body": args.extra_body, "extra_body_set_review": args.extra_body_set_review,
     }.items() if v is not None}
     return ProviderConfig(provider=provider, model=model or "", base_url=base_url or None,
                           api_key=SecretStr(key) if key else None, **extra)

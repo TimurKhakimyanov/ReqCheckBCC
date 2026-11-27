@@ -33,8 +33,11 @@ docker compose -p reqcheck-core --profile cli run --rm --build -e GEMINI_API_KEY
 docker compose -p reqcheck-core --profile cli run --rm -e ANTHROPIC_API_KEY=ваш-ключ cli /data/requirements.pdf /data/report.md --provider anthropic --model claude-opus-5-5
 ```
 
+Локальная модель на vLLM / Ollama (ключ не нужен). Для моделей с рассуждениями рассуждения выключаются на
+проверке требований и включаются на поиске противоречий в наборе (`--extra-body`, `--extra-body-set-review`):
+
 ```powershell
-docker compose -p reqcheck-core --profile cli run --rm cli /data/requirements.md /data/report.md --provider openai_compatible --base-url http://vllm.example.local:8000/v1 --model mimo-v2.6-flash
+docker compose -p reqcheck-core --profile cli run --rm cli /data/requirements.md /data/report.md --provider openai_compatible --base-url http://vllm.example.local:8000/v1 --model mimo-v2.6-flash --concurrency 4 --max-tokens 48000 --extra-body '{\"chat_template_kwargs\":{\"enable_thinking\":false}}' --extra-body-set-review '{\"chat_template_kwargs\":{\"enable_thinking\":true}}'
 ```
 
 (`OPENAI_API_KEY` + `--provider openai` — аналогично.)
