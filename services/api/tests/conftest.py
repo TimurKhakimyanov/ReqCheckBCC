@@ -9,6 +9,7 @@ import req_core  # noqa: E402
 from app import testing  # noqa: E402
 
 testing.prepare_test_database("api_test")
+testing.block_external_network()  # тесты не ходят во внешнюю сеть (LLM-провайдеры и т. п.)
 
 from app.services import set_services  # noqa: E402
 from asgi_lifespan import LifespanManager  # noqa: E402

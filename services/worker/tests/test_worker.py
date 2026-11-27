@@ -15,6 +15,7 @@ import req_core  # noqa: E402
 from app import testing  # noqa: E402
 
 testing.prepare_test_database("worker_test")
+testing.block_external_network()  # тесты не ходят во внешнюю сеть (LLM-провайдеры и т. п.)
 
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal  # noqa: E402

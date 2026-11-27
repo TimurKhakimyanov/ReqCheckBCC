@@ -302,3 +302,12 @@ async def test_logout(anon):
     assert (await anon.get("/api/auth/me")).status_code == 200
     assert (await anon.post("/api/auth/logout")).status_code == 204
     assert (await anon.get("/api/auth/me")).status_code == 401
+
+
+def test_external_network_is_blocked():
+    import socket
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="external network"):
+        socket.create_connection(("8.8.8.8", 443), timeout=1)

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
-from collections.abc import Iterator
+import socket
+from collections.abc import Callable, Iterator
 from importlib import resources
 from pathlib import Path
 
@@ -57,6 +59,41 @@ class RecordingServices(Services):
     def enqueue_run(self, run_id: str) -> str:
         self.enqueued.append(run_id)
         return f"task-{run_id}"
+
+
+def block_external_network() -> Callable[[], None]:
+    """Запрещает тестам соединения с внешними адресами: разрешены только loopback и частные сети
+    (postgres, redis в сети compose). Любая попытка сходить к провайдеру LLM падает с понятной ошибкой.
+    Возвращает функцию, снимающую запрет."""
+    original = socket.socket.connect
+    original_ex = socket.socket.connect_ex
+
+    def _check(address) -> None:
+        if isinstance(address, tuple) and address:
+            host = str(address[0])
+            try:
+                ip = ipaddress.ip_address(host.split("%")[0])
+            except ValueError:
+                raise RuntimeError(f"tests must not resolve external hosts: {host}") from None
+            if not (ip.is_loopback or ip.is_private or ip.is_link_local):
+                raise RuntimeError(f"tests must not reach external network: {host}")
+
+    def connect(self, address):
+        _check(address)
+        return original(self, address)
+
+    def connect_ex(self, address):
+        _check(address)
+        return original_ex(self, address)
+
+    socket.socket.connect = connect  # type: ignore[method-assign]
+    socket.socket.connect_ex = connect_ex  # type: ignore[method-assign]
+
+    def restore() -> None:
+        socket.socket.connect = original  # type: ignore[method-assign]
+        socket.socket.connect_ex = original_ex  # type: ignore[method-assign]
+
+    return restore
 
 
 def sample_report_json() -> str:
