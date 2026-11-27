@@ -378,9 +378,9 @@ services:
     environment:
       REDIS_ADDR: redis://redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-      # Длина очереди Celery: бэкенд кладёт задачи в очередь `reqcheck` (список в db0, REDIS_URL=.../0)
-      # → метрика redis_key_size{key="reqcheck"}.
-      REDIS_EXPORTER_CHECK_SINGLE_KEYS: db0=reqcheck
+      # Длина очереди Celery: бэкенд кладёт задачи в очередь `celery` (список в db0, REDIS_URL=.../0)
+      # → метрика redis_key_size{key="celery"}.
+      REDIS_EXPORTER_CHECK_SINGLE_KEYS: db0=celery
     depends_on:
       redis: { condition: service_healthy }
     healthcheck:

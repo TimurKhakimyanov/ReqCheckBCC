@@ -34,26 +34,28 @@ groups:
           summary: "Больше 5% ответов API — ошибки 5xx"
 
       - alert: CeleryQueueBacklog
-        expr: max(redis_key_size{key="reqcheck"}) > 20
+        expr: max(redis_key_size{key="celery"}) > 20
         for: 10m
         labels: { severity: warning }
         annotations:
           summary: "В очереди Celery больше 20 задач 10 минут — не хватает воркеров или LLM тормозит"
 
       - alert: RunsFailing
-        expr: sum(increase(reqcheck_worker_runs_total{status="failed"}[30m])) >= 3
+        expr: sum(increase(reqcheck_runs_total{status="failed"}[30m])) >= 3
         labels: { severity: warning }
         annotations:
           summary: "За 30 минут упало 3 и более прогона (причина — runs.error / логи worker)"
 
-      - alert: ChatHighErrorRate
+      - alert: LlmHighErrorRate
+        # Ошибки по вызовам видит только api (чат); воркер отдаёт итоговые успешные вызовы прогона,
+        # поэтому считаем долю по job="api", иначе ошибки чата растворяются в вызовах прогонов.
         expr: |
-          sum by (provider) (rate(reqcheck_chat_messages_total{result="error"}[10m]))
-            / clamp_min(sum by (provider) (rate(reqcheck_chat_messages_total[10m])), 1e-9) > 0.2
+          sum by (provider) (rate(reqcheck_llm_requests_total{job="api", outcome="error"}[10m]))
+            / clamp_min(sum by (provider) (rate(reqcheck_llm_requests_total{job="api"}[10m])), 1e-9) > 0.2
         for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "Больше 20% вопросов в чате ({{ $labels.provider }}) заканчиваются ошибкой LLM"
+          summary: "Больше 20% запросов к LLM из чата ({{ $labels.provider }}) заканчиваются ошибкой"
 
       - alert: EmbedderErrors
         expr: sum(increase(reqcheck_embedder_errors_total[10m])) > 5

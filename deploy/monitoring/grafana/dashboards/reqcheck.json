@@ -86,7 +86,7 @@
       "type": "stat", "title": "Прогоны за период",
       "gridPos": { "h": 8, "w": 4, "x": 0, "y": 15 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "sum by (status) (increase(reqcheck_worker_runs_total[$__range]))", "legendFormat": "{{status}}", "instant": true } ],
+      "targets": [ { "refId": "A", "expr": "sum by (status) (increase(reqcheck_runs_total[$__range]))", "legendFormat": "{{status}}", "instant": true } ],
       "options": { "colorMode": "value", "graphMode": "none", "textMode": "value_and_name", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 },
         "overrides": [
@@ -100,19 +100,19 @@
       "gridPos": { "h": 8, "w": 7, "x": 4, "y": 15 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(reqcheck_worker_run_duration_seconds_bucket{status=\"done\"}[$__rate_interval])))", "legendFormat": "p50" },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(reqcheck_worker_run_duration_seconds_bucket{status=\"done\"}[$__rate_interval])))", "legendFormat": "p95" }
+        { "refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(reqcheck_run_duration_seconds_bucket{status=\"done\"}[$__rate_interval])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(reqcheck_run_duration_seconds_bucket{status=\"done\"}[$__rate_interval])))", "legendFormat": "p95" }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } }
     },
     {
       "type": "timeseries", "title": "Очередь Celery и прогоны в работе",
-      "description": "Длина очереди reqcheck в Redis (redis-exporter) и число выполняющихся прогонов (воркер).",
+      "description": "Длина очереди celery в Redis (redis-exporter) и число выполняющихся прогонов (воркер).",
       "gridPos": { "h": 8, "w": 6, "x": 11, "y": 15 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "refId": "A", "expr": "max(redis_key_size{key=\"reqcheck\"})", "legendFormat": "в очереди" },
-        { "refId": "B", "expr": "sum(reqcheck_worker_runs_in_progress)", "legendFormat": "в работе" }
+        { "refId": "A", "expr": "max(redis_key_size{key=\"celery\"})", "legendFormat": "в очереди" },
+        { "refId": "B", "expr": "sum(reqcheck_runs_in_progress)", "legendFormat": "в работе" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0 } }
     },
@@ -136,7 +136,7 @@
       "description": "Учитываются по завершении прогона (usage провайдера). Токены чата не входят.",
       "gridPos": { "h": 8, "w": 4, "x": 0, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "sum by (kind) (increase(reqcheck_llm_tokens_total[$__range]))", "legendFormat": "{{kind}}", "instant": true } ],
+      "targets": [ { "refId": "A", "expr": "sum by (type) (increase(reqcheck_llm_tokens_total[$__range]))", "legendFormat": "{{type}}", "instant": true } ],
       "options": { "colorMode": "value", "graphMode": "none", "textMode": "value_and_name", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 } }
     },
@@ -144,15 +144,17 @@
       "type": "timeseries", "title": "Токены LLM в минуту по моделям",
       "gridPos": { "h": 8, "w": 8, "x": 4, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "sum by (provider, model, kind) (rate(reqcheck_llm_tokens_total[$__rate_interval])) * 60", "legendFormat": "{{provider}}/{{model}} {{kind}}" } ],
+      "targets": [ { "refId": "A", "expr": "sum by (provider, model, type) (rate(reqcheck_llm_tokens_total[$__rate_interval])) * 60", "legendFormat": "{{provider}}/{{model}} {{type}}" } ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" }, "fillOpacity": 60 } } }
     },
     {
-      "type": "timeseries", "title": "Вызовы LLM в минуту",
+      "type": "timeseries", "title": "Запросы к LLM в минуту по исходу",
+      "description": "Воркер добавляет вызовы прогона (outcome=ok) по его завершении; api считает вопросы чата (ok / error).",
       "gridPos": { "h": 8, "w": 6, "x": 12, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "sum by (provider, model) (rate(reqcheck_llm_calls_total[$__rate_interval])) * 60", "legendFormat": "{{provider}}/{{model}}" } ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" }, "fillOpacity": 60 } } }
+      "targets": [ { "refId": "A", "expr": "sum by (provider, model, outcome) (rate(reqcheck_llm_requests_total[$__rate_interval])) * 60", "legendFormat": "{{provider}}/{{model}} {{outcome}}" } ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" }, "fillOpacity": 60 } },
+        "overrides": [ { "matcher": { "id": "byRegexp", "options": ".* error" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] } ] }
     },
     {
       "type": "stat", "title": "Стоимость LLM за период, USD",
@@ -167,10 +169,27 @@
       "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 } }
     },
 
-    { "type": "row", "title": "Активность и поиск", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 }, "panels": [] },
+    { "type": "row", "title": "Длительности", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 }, "panels": [] },
+    {
+      "type": "timeseries", "title": "Длительность стадий конвейера p95",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(reqcheck_run_stage_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "{{stage}}" } ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries", "title": "Латентность LLM p95 (чат)",
+      "description": "Время ответа LLM на вопрос в чате (api). Латентность отдельных вызовов внутри прогона ядро пока не отдаёт.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, provider, model) (rate(reqcheck_llm_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "{{provider}}/{{model}}" } ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+
+    { "type": "row", "title": "Активность и поиск", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 }, "panels": [] },
     {
       "type": "timeseries", "title": "Загрузки и запуски прогонов в час",
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 33 },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 42 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "refId": "A", "expr": "sum by (format) (rate(reqcheck_documents_uploaded_total[$__rate_interval])) * 3600", "legendFormat": "загрузка {{format}}" },
@@ -180,25 +199,25 @@
     },
     {
       "type": "timeseries", "title": "Входы и чат в час",
-      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 33 },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 42 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "refId": "A", "expr": "sum by (result) (rate(reqcheck_logins_total[$__rate_interval])) * 3600", "legendFormat": "вход {{result}}" },
-        { "refId": "B", "expr": "sum by (provider, result) (rate(reqcheck_chat_messages_total[$__rate_interval])) * 3600", "legendFormat": "чат {{provider}} {{result}}" }
+        { "refId": "B", "expr": "sum by (provider, outcome) (rate(reqcheck_llm_requests_total{job=\"api\"}[$__rate_interval])) * 3600", "legendFormat": "чат {{provider}} {{outcome}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "short" },
         "overrides": [ { "matcher": { "id": "byRegexp", "options": ".*(failed|error).*" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] } ] }
     },
     {
       "type": "timeseries", "title": "Открытые SSE-потоки",
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 33 },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 42 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "sum by (kind) (reqcheck_sse_connections)", "legendFormat": "{{kind}}" } ],
+      "targets": [ { "refId": "A", "expr": "sum by (stream) (reqcheck_sse_connections)", "legendFormat": "{{stream}}" } ],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0 } }
     },
     {
       "type": "timeseries", "title": "Эмбеддинги: тексты/с, p95, ошибки",
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 33 },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 42 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "refId": "A", "expr": "sum by (kind) (rate(reqcheck_embedder_texts_total[$__rate_interval]))", "legendFormat": "тексты {{kind}}" },
@@ -212,24 +231,24 @@
         ] }
     },
 
-    { "type": "row", "title": "Ресурсы", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 }, "panels": [] },
+    { "type": "row", "title": "Ресурсы", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 50 }, "panels": [] },
     {
       "type": "timeseries", "title": "CPU по сервисам, ядер",
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 42 },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 51 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [ { "refId": "A", "expr": "sum by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_project=\"$project\"}[$__rate_interval]))", "legendFormat": "{{container_label_com_docker_compose_service}}" } ],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 2 } }
     },
     {
       "type": "timeseries", "title": "Память по сервисам (working set)",
-      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 42 },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 51 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [ { "refId": "A", "expr": "sum by (container_label_com_docker_compose_service) (container_memory_working_set_bytes{container_label_com_docker_compose_project=\"$project\"})", "legendFormat": "{{container_label_com_docker_compose_service}}" } ],
       "fieldConfig": { "defaults": { "unit": "bytes" } }
     },
     {
       "type": "timeseries", "title": "Postgres: соединения и размер БД",
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 42 },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 51 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "refId": "A", "expr": "sum(pg_stat_database_numbackends{datname!~\"template.*\"})", "legendFormat": "соединения" },
@@ -240,7 +259,7 @@
     },
     {
       "type": "timeseries", "title": "Redis: память и клиенты",
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 42 },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 51 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "refId": "A", "expr": "max(redis_memory_used_bytes)", "legendFormat": "память" },
@@ -251,17 +270,17 @@
         "overrides": [ { "matcher": { "id": "byName", "options": "клиенты" }, "properties": [ { "id": "unit", "value": "short" }, { "id": "custom.axisPlacement", "value": "right" } ] } ] }
     },
 
-    { "type": "row", "title": "Логи", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 50 }, "panels": [] },
+    { "type": "row", "title": "Логи", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 59 }, "panels": [] },
     {
       "type": "timeseries", "title": "Ошибки в логах по сервисам",
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 51 },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 60 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [ { "refId": "A", "expr": "sum by (service) (count_over_time({service=~\"$service\", level=~\"error|critical|fatal\"} [$__auto]))", "legendFormat": "{{service}}" } ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } } } }
     },
     {
       "type": "logs", "title": "Логи контейнеров",
-      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 58 },
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 67 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [ { "refId": "A", "expr": "{service=~\"$service\"}" } ],
       "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true, "dedupStrategy": "none" }
