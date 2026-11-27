@@ -148,9 +148,8 @@ def split_title(title: str, explanation: str) -> tuple[str, str]:
     explanation = explanation or title
     if len(title) <= TITLE_LIMIT:
         return title, explanation
-    # первая фраза (до . ! ? : ;), если она осмысленной длины; иначе — обрезка по слову
-    first = re.split(r"(?<=[.!?:;])\s+", title, maxsplit=1)[0].rstrip(".:;")
-    short = first if 25 <= len(first) <= TITLE_LIMIT else shorten(title, TITLE_LIMIT)
+    # обрезка по слову: деление по «первой фразе» рвёт «200. Created», «Content-Type: …» и теряет смысл
+    short = shorten(title, TITLE_LIMIT)
     if title not in explanation:
         explanation = f"{title} {explanation}".strip() if explanation != title else title
     return short, explanation

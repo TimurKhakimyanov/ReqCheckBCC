@@ -199,7 +199,7 @@ def test_long_model_title_is_split_without_losing_text():
     long = ("«Проведённые покупки» — неопределённый статус: не сказано, что считать проведённой покупкой "
             "(авторизованная, поставленная в оборот, со статусом posted), поэтому тестировщик не знает, что проверять.")
     title, expl = split_title(long, "Короткое пояснение.")
-    assert title == "«Проведённые покупки» — неопределённый статус"
+    assert len(title) <= TITLE_LIMIT and title.startswith("«Проведённые покупки» — неопределённый статус: не сказано") and title.endswith("…")
     assert long in expl and expl.endswith("Короткое пояснение.")
     assert split_title("Коротко", "Пояснение") == ("Коротко", "Пояснение")
     assert split_title("", "Только пояснение") == ("Только пояснение", "Только пояснение")
@@ -226,3 +226,12 @@ def test_foreign_script_leaks_are_removed_from_model_text(sample_path):
     report = run_pipeline(parse_document(sample_path), llm)
     assert report.conclusion.rationale == "Нет ветки happy-path."
     assert report.conclusion.top_fixes == ["Описать ветки успеха"]
+
+
+def test_title_is_not_cut_at_status_code_period():
+    from req_core.pipeline import split_title
+
+    long = ("Требование 401 размещено в разделе «200. Successful — Created», что противоречит смыслу кода 401 "
+            "и вводит в заблуждение разработчика и тестировщика при реализации обработки ошибок авторизации")
+    title, _ = split_title(long, "")
+    assert "Successful" in title
