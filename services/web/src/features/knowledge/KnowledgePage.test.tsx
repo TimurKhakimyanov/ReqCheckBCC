@@ -68,6 +68,75 @@ describe('Knowledge wiki', () => {
     expect(screen.queryByLabelText('Текст')).toBeNull()
   })
 
+  it('shows empty folders in the tree and an overview with folders, recent edits and hubs', async () => {
+    open()
+    const tree = await screen.findByRole('navigation', { name: 'Папки и заметки' })
+    expect(await within(tree).findByRole('button', { name: 'Черновики' })).toBeInTheDocument()
+    const byFolder = await screen.findByRole('list', { name: 'Страницы по папкам' })
+    expect(within(byFolder).getByRole('button', { name: /Банк\s*4/ })).toBeInTheDocument()
+    const recent = screen.getByRole('list', { name: 'Недавние правки' })
+    expect(within(recent).getAllByRole('button')[0]).toHaveTextContent('Карты: лимиты и ПИН-код')
+    const hubs = await screen.findByRole('list', { name: 'Самые связанные' })
+    expect(within(hubs).getByRole('button', { name: /Глоссарий банка/ })).toBeInTheDocument()
+  })
+
+  it('creates, renames and deletes folders; contents move with them', async () => {
+    const user = userEvent.setup()
+    open('/knowledge?folder=Банк')
+    await user.click(await screen.findByRole('button', { name: 'Подпапка' }))
+    let dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByLabelText('Внутри папки')).toHaveValue('Банк')
+    await user.type(within(dialog).getByLabelText('Название'), 'Депозиты')
+    await user.click(within(dialog).getByRole('button', { name: 'Создать' }))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Депозиты' })).toBeInTheDocument()
+    expect(db.knowledgeFolders).toContain('Банк/Депозиты')
+
+    // переименовать «Банк/Карты» и перенести в корень
+    const tree = screen.getByRole('navigation', { name: 'Папки и заметки' })
+    await user.click(within(tree).getByRole('button', { name: 'Карты' }))
+    await user.click(await screen.findByRole('button', { name: 'Переименовать или перенести' }))
+    dialog = await screen.findByRole('dialog')
+    const name = within(dialog).getByLabelText('Название')
+    await user.clear(name)
+    await user.type(name, 'Карточные продукты')
+    await user.selectOptions(within(dialog).getByLabelText('Внутри папки'), '')
+    await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Карточные продукты' })).toBeInTheDocument()
+    expect(db.knowledge.find((k) => k.id === 'kb-cards')!.folder).toBe('Карточные продукты')
+
+    // удалить папку: страница переезжает в корень
+    await user.click(screen.getByRole('button', { name: 'Удалить папку' }))
+    dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('переедут в «Вся база»')
+    await user.click(within(dialog).getByRole('button', { name: 'Удалить' }))
+    await waitFor(() => expect(db.knowledge.find((k) => k.id === 'kb-cards')!.folder).toBe(''))
+    expect(await screen.findByRole('heading', { level: 2, name: 'База знаний' })).toBeInTheDocument()
+  })
+
+  it('searches page text and shows highlighted snippets', async () => {
+    const user = userEvent.setup()
+    open()
+    await user.type(await screen.findByRole('searchbox', { name: 'Поиск по страницам' }), 'тиын')
+    const results = await screen.findByRole('region', { name: 'Найдено в тексте' })
+    const hit = await within(results).findByRole('button', { name: /^Глоссарий банка/ })
+    expect(within(hit).getAllByText(/тиын/i, { selector: 'mark' }).length).toBeGreaterThan(0)
+    await user.click(hit)
+    expect(await screen.findByRole('heading', { level: 2, name: 'Глоссарий банка' })).toBeInTheDocument()
+  })
+
+  it('renaming a page fixes [[links]] to it and shows its local graph', async () => {
+    const user = userEvent.setup()
+    open('/knowledge?note=kb-glossary')
+    expect(await screen.findByRole('img', { name: /Связи страницы: заметок 4/ })).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: 'Редактировать' }))
+    const title = screen.getByLabelText('Название')
+    await user.clear(title)
+    await user.type(title, 'Словарь банка')
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Словарь банка' })).toBeInTheDocument()
+    expect(db.knowledge.find((k) => k.id === 'kb-cards')!._content).toContain('[[Словарь банка]]')
+  })
+
   it('draws the knowledge graph', async () => {
     open('/knowledge?view=graph')
     const svg = await screen.findByRole('img', { name: /Граф базы знаний: заметок 5/ })

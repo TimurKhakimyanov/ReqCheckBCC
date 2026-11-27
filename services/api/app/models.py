@@ -142,6 +142,14 @@ class KnowledgeItem(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class KnowledgeFolder(Base):
+    """Папка вики, созданная явно (может быть пустой). Папки с заметками существуют и без строки здесь."""
+
+    __tablename__ = "knowledge_folders"
+    path: Mapped[str] = mapped_column(String(500), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

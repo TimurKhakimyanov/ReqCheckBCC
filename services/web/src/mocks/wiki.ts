@@ -1,6 +1,6 @@
 // Демо-вики для режима моков и тестов: заметки с папками, ссылками [[…]] и упоминаниями критериев,
 // и упрощённый граф — как services/api/app/wiki.py.
-import type { KnowledgeDetail, KnowledgeGraph, KnowledgeItem } from '@/api/types'
+import type { KnowledgeDetail, KnowledgeFolder, KnowledgeGraph, KnowledgeItem, KnowledgeSearchHit } from '@/api/types'
 
 export type MockNote = KnowledgeItem & { _readyAt?: number; _content: string }
 
@@ -55,17 +55,89 @@ export function detail(notes: MockNote[], id: string): KnowledgeDetail | null {
   }
 }
 
-export function graph(notes: MockNote[]): KnowledgeGraph {
+export const normFolder = (raw: string) =>
+  raw.replace(/\\/g, '/').split('/').map((p) => p.trim()).filter((p) => p && p !== '.' && p !== '..').join('/')
+export const within = (path: string, folder: string) => path === folder || path.startsWith(folder + '/')
+export const parentOf = (f: string) => (f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '')
+export function movePath(path: string, from: string, to: string): string {
+  if (path === from) return to
+  if (path.startsWith(from + '/')) {
+    const rest = path.slice(from.length + 1)
+    return to ? `${to}/${rest}` : rest
+  }
+  return path
+}
+
+/** Все папки: явно созданные и те, где лежат заметки, вместе с родителями. */
+export function allFolders(notes: { folder?: string }[], explicit: string[] = []): string[] {
+  const out = new Set<string>()
+  ;[...notes.map((n) => n.folder ?? ''), ...explicit].forEach((f) => {
+    const parts = f.split('/').filter(Boolean)
+    parts.forEach((_, i) => out.add(parts.slice(0, i + 1).join('/')))
+  })
+  return [...out].sort()
+}
+
+export function folderList(notes: MockNote[], explicit: string[]): KnowledgeFolder[] {
+  return allFolders(notes, explicit).map((path) => ({
+    path,
+    notes: notes.filter((n) => (n.folder ?? '') === path).length,
+    total: notes.filter((n) => within(n.folder ?? '', path)).length,
+    explicit: explicit.includes(path),
+  }))
+}
+
+/** [[Старое]], [[Старое|подпись]], [[папка/Старое]] → [[Новое…]] */
+export function renameLinks(text: string, oldTitle: string, newTitle: string): string {
+  const old = key(oldTitle)
+  return text.replace(/\[\[([^[\]\n]{1,300})\]\]/g, (m, inner: string) => {
+    const bar = inner.indexOf('|')
+    const target = (bar >= 0 ? inner.slice(0, bar) : inner).trim()
+    if (key(target) !== old && key(target.split('/').pop() ?? '') !== old) return m
+    return `[[${newTitle}${bar >= 0 ? inner.slice(bar) : ''}]]`
+  })
+}
+
+/** Текст без разметки Markdown для фрагментов поиска — как plain_text в services/api/app/wiki.py */
+export const plainText = (text: string) =>
+  text
+    .replace(/\[\[([^[\]\n]{1,300})\]\]/g, (_, inner: string) => inner.split('|').pop()!.trim())
+    .replace(/\|?\s*:?-{3,}:?\s*|[#*_`>|]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(' ')
+
+/** Как services/api/app/wiki.py search_notes: все слова запроса; совпадение в названии весит больше. */
+export function search(notes: MockNote[], q: string, limit = 20): KnowledgeSearchHit[] {
+  const words = key(q).split(' ').filter(Boolean)
+  if (!words.length) return []
+  const hits: KnowledgeSearchHit[] = []
+  for (const n of notes) {
+    const title = key(n.title)
+    const body = n._content.toLowerCase().replace(/ё/g, 'е')
+    const hay = `${title} ${key(n.folder ?? '')} ${body}`
+    if (!words.every((w) => hay.includes(w))) continue
+    const count = (w: string) => Math.min(5, body.split(w).length - 1)
+    const score = words.reduce((s, w) => s + (title.includes(w) ? 3 : 0) + count(w) * 0.2, 0)
+    const plain = plainText(n._content)
+    const low = plain.toLowerCase().replace(/ё/g, 'е')
+    const pos = words.map((w) => low.indexOf(w)).filter((p) => p >= 0)
+    const at = pos.length ? Math.min(...pos) : 0
+    const start = Math.max(0, at - 50)
+    const end = Math.min(plain.length, start + 160)
+    const snippet = (start > 0 ? '…' : '') + plain.slice(start, end).trim() + (end < plain.length ? '…' : '')
+    hits.push({ id: n.id, title: n.title, folder: n.folder ?? '', snippet, score: Math.round(score * 100) / 100 })
+  }
+  return hits.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title)).slice(0, limit)
+}
+
+export function graph(notes: MockNote[], explicit: string[] = []): KnowledgeGraph {
   const find = finder(notes)
   const nodes: KnowledgeGraph['nodes'] = []
   const edges: KnowledgeGraph['edges'] = []
-  const folders = new Set<string>()
-  notes.forEach((n) => {
-    const parts = (n.folder ?? '').split('/').filter(Boolean)
-    parts.forEach((_, i) => folders.add(parts.slice(0, i + 1).join('/')))
-  })
-  ;[...folders].sort().forEach((f) => {
-    nodes.push({ id: `folder:${f}`, kind: 'folder', title: f.split('/').pop()!, folder: f, size: 0 })
+  allFolders(notes, explicit).forEach((f) => {
+    const size = notes.filter((n) => within(n.folder ?? '', f)).length
+    nodes.push({ id: `folder:${f}`, kind: 'folder', title: f.split('/').pop()!, folder: f, size })
     if (f.includes('/')) edges.push({ source: `folder:${f}`, target: `folder:${f.slice(0, f.lastIndexOf('/'))}`, kind: 'folder' })
   })
   const used = new Map<string, number>()

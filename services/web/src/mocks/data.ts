@@ -64,6 +64,8 @@ export interface Db {
   reviews: Record<string, Record<string, FindingReview>>
   chats: Record<string, ChatMessage[]>
   knowledge: MockNote[]
+  /** Явно созданные папки вики (в том числе пустые) */
+  knowledgeFolders: string[]
   audit: AuditEntry[]
   auditSeq: number
   settings: AppSettings & { _embeddingsKey?: string }
@@ -160,6 +162,7 @@ function seed(): Db {
     },
     chats: {},
     knowledge: seedNotes(ago),
+    knowledgeFolders: ['Банк/Черновики'],
     audit: [
       { id: 4, ts: ago(60), actor: 'admin', action: 'finding.review', target: `${runId}/D-003`, details: { status: 'accepted' } },
       { id: 3, ts: ago(95), actor: 'admin', action: 'run.create', target: runId, details: { provider: 'gemini' } },

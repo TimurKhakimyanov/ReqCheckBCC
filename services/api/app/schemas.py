@@ -264,6 +264,36 @@ class KnowledgePatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
     text: str | None = Field(default=None, min_length=1)
     folder: str | None = Field(default=None, max_length=500)
+    update_links: bool = Field(default=True, description="При смене названия поправить [[ссылки]] в других заметках")
+
+
+class KnowledgeFolderOut(BaseModel):
+    path: str = Field(description="«Банк/Карты»")
+    notes: int = Field(default=0, description="Заметок прямо в папке")
+    total: int = Field(default=0, description="Заметок в папке и во вложенных")
+    explicit: bool = Field(default=False, description="Папка создана явно (может быть пустой)")
+
+
+class KnowledgeFolderIn(BaseModel):
+    path: str = Field(min_length=1, max_length=500)
+
+
+class KnowledgeFolderMove(BaseModel):
+    path: str = Field(min_length=1, max_length=500, description="Текущий путь папки")
+    new_path: str = Field(min_length=1, max_length=500, description="Новый путь: переименование и/или перенос")
+
+
+class KnowledgeFolderOpOut(BaseModel):
+    path: str = Field(description="Итоговый путь папки (для удаления — куда перенесено содержимое)")
+    moved: int = Field(description="Сколько заметок сменили папку")
+
+
+class KnowledgeSearchHit(BaseModel):
+    id: str
+    title: str
+    folder: str
+    snippet: str
+    score: float
 
 
 class GraphNode(BaseModel):

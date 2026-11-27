@@ -11,9 +11,12 @@ import type {
   FindingWithReview,
   Health,
   KnowledgeDetail,
+  KnowledgeFolder,
+  KnowledgeFolderOp,
   KnowledgeGraph,
   KnowledgeItem,
   KnowledgePatch,
+  KnowledgeSearchHit,
   ModelsResponse,
   Page,
   ProviderId,
@@ -200,6 +203,12 @@ export const api = {
     request<KnowledgeItem>(`/knowledge/${id}`, { method: 'PATCH', json: body }),
   knowledgeGraph: () => request<KnowledgeGraph>('/knowledge/graph'),
   deleteKnowledge: (id: string) => request<void>(`/knowledge/${id}`, { method: 'DELETE' }),
+  searchKnowledge: (q: string, limit = 20) => request<KnowledgeSearchHit[]>(`/knowledge/search${qs({ q, limit })}`),
+  knowledgeFolders: () => request<KnowledgeFolder[]>('/knowledge/folders'),
+  createFolder: (path: string) => request<KnowledgeFolder>('/knowledge/folders', { method: 'POST', json: { path } }),
+  moveFolder: (path: string, newPath: string) =>
+    request<KnowledgeFolderOp>('/knowledge/folders', { method: 'PATCH', json: { path, new_path: newPath } }),
+  deleteFolder: (path: string) => request<KnowledgeFolderOp>(`/knowledge/folders${qs({ path })}`, { method: 'DELETE' }),
 
   // --- service
   health: () => request<Health>('/health'),

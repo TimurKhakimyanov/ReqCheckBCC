@@ -14,20 +14,37 @@ from ..app_settings import get_app_settings
 from ..deps import DB, CurrentUser, Svc, parse_uuid
 from ..errors import ApiError, not_found
 from ..knowledge import extract_text, index_item
-from ..models import KnowledgeItem, utcnow
+from ..models import KnowledgeFolder, KnowledgeItem, utcnow
 from ..schemas import (
     ErrorOut,
     KnowledgeDetailOut,
+    KnowledgeFolderIn,
+    KnowledgeFolderMove,
+    KnowledgeFolderOpOut,
+    KnowledgeFolderOut,
     KnowledgeGraphOut,
     KnowledgeIn,
     KnowledgeItemOut,
     KnowledgeLinkOut,
     KnowledgePatch,
     KnowledgeRef,
+    KnowledgeSearchHit,
     SearchHit,
 )
 from ..vectors import KNOWLEDGE, REQUIREMENTS
-from ..wiki import Note, build_graph, criteria_mentions, normalize_folder, resolve_links
+from ..wiki import (
+    Note,
+    all_folders,
+    build_graph,
+    criteria_mentions,
+    move_path,
+    normalize_folder,
+    parent_of,
+    rename_links,
+    resolve_links,
+    search_notes,
+    within,
+)
 from .documents import FORMATS, safe_name
 
 router = APIRouter(tags=["knowledge"])
@@ -129,7 +146,114 @@ async def add_knowledge(request: Request, background: BackgroundTasks, user: Cur
 def knowledge_graph(_: CurrentUser, db: DB) -> KnowledgeGraphOut:
     """Граф вики: заметки, папки, упомянутые критерии; рёбра — ссылки [[…]], упоминания и вложенность."""
     items = db.scalars(select(KnowledgeItem).order_by(KnowledgeItem.created_at)).all()
-    return KnowledgeGraphOut.model_validate(build_graph(_note(i) for i in items))
+    return KnowledgeGraphOut.model_validate(build_graph([_note(i) for i in items], _explicit(db)))
+
+
+@router.get("/knowledge/search", response_model=list[KnowledgeSearchHit])
+def search_knowledge(_: CurrentUser, db: DB, q: str = Query(min_length=1, max_length=500),
+                     limit: int = Query(20, ge=1, le=100)) -> list[KnowledgeSearchHit]:
+    """Поиск по страницам вики: название, папка и текст; все слова запроса должны встретиться."""
+    items = db.scalars(select(KnowledgeItem)).all()
+    return [KnowledgeSearchHit(**vars(h)) for h in search_notes([_note(i) for i in items], q, limit)]
+
+
+# --- папки -----------------------------------------------------------------------------------------
+def _explicit(db: Session) -> list[str]:
+    return list(db.scalars(select(KnowledgeFolder.path)).all())
+
+
+def _folders_out(db: Session) -> list[KnowledgeFolderOut]:
+    notes = [i.folder or "" for i in db.scalars(select(KnowledgeItem)).all()]
+    explicit = set(_explicit(db))
+    paths = all_folders([Note("", "", f, "", "") for f in notes], explicit)
+    return [KnowledgeFolderOut(path=p, notes=sum(1 for f in notes if f == p), total=sum(1 for f in notes if within(f, p)),
+                               explicit=p in explicit) for p in paths]
+
+
+def _folder_exists(db: Session, path: str) -> bool:
+    return any(f.path == path for f in _folders_out(db))
+
+
+def _clean_folder(raw: str) -> str:
+    path = normalize_folder(raw)
+    if not path:
+        raise ApiError(400, "folder_required", "Укажите название папки")
+    return path
+
+
+@router.get("/knowledge/folders", response_model=list[KnowledgeFolderOut])
+def list_folders(_: CurrentUser, db: DB) -> list[KnowledgeFolderOut]:
+    """Все папки вики: явно созданные (в том числе пустые) и те, где лежат заметки; со счётчиками."""
+    return _folders_out(db)
+
+
+@router.post("/knowledge/folders", response_model=KnowledgeFolderOut, status_code=201,
+             responses={400: {"model": ErrorOut}, 409: {"model": ErrorOut}})
+def create_folder(body: KnowledgeFolderIn, request: Request, user: CurrentUser, db: DB) -> KnowledgeFolderOut:
+    path = _clean_folder(body.path)
+    if _folder_exists(db, path):
+        raise ApiError(409, "folder_exists", f"Папка «{path}» уже есть")
+    db.add(KnowledgeFolder(path=path))
+    audit(db, user.username, "knowledge_folder_created", path, {}, request, commit=False)
+    db.commit()
+    return KnowledgeFolderOut(path=path, explicit=True)
+
+
+@router.patch("/knowledge/folders", response_model=KnowledgeFolderOpOut,
+              responses={400: {"model": ErrorOut}, 404: {"model": ErrorOut}, 409: {"model": ErrorOut}})
+def move_folder(body: KnowledgeFolderMove, request: Request, user: CurrentUser, db: DB) -> KnowledgeFolderOpOut:
+    """Переименование или перенос папки вместе с вложенными папками и заметками.
+    Заметки не переиндексируются: папка в Qdrant не хранится."""
+    old, new = _clean_folder(body.path), _clean_folder(body.new_path)
+    if not _folder_exists(db, old):
+        raise not_found("Папка")
+    if new == old:
+        return KnowledgeFolderOpOut(path=new, moved=0)
+    if within(new, old):
+        raise ApiError(400, "folder_into_itself", "Нельзя перенести папку внутрь неё самой")
+    if _folder_exists(db, new):
+        raise ApiError(409, "folder_exists", f"Папка «{new}» уже есть")
+    moved = _move_subtree(db, old, new)
+    if db.get(KnowledgeFolder, new) is None:
+        db.add(KnowledgeFolder(path=new))  # сохраняем папку, даже если она пустая
+    audit(db, user.username, "knowledge_folder_moved", old, {"to": new, "notes": moved}, request, commit=False)
+    db.commit()
+    return KnowledgeFolderOpOut(path=new, moved=moved)
+
+
+@router.delete("/knowledge/folders", response_model=KnowledgeFolderOpOut, responses={404: {"model": ErrorOut}})
+def delete_folder(request: Request, user: CurrentUser, db: DB,
+                  path: str = Query(min_length=1, max_length=500)) -> KnowledgeFolderOpOut:
+    """Удаление папки. Заметки и вложенные папки не теряются — переезжают в родительскую папку."""
+    folder = _clean_folder(path)
+    if not _folder_exists(db, folder):
+        raise not_found("Папка")
+    parent = parent_of(folder)
+    db.query(KnowledgeFolder).filter(KnowledgeFolder.path == folder).delete()
+    moved = _move_subtree(db, folder, parent)
+    audit(db, user.username, "knowledge_folder_deleted", folder, {"to": parent, "notes": moved}, request, commit=False)
+    db.commit()
+    return KnowledgeFolderOpOut(path=parent, moved=moved)
+
+
+def _move_subtree(db: Session, old: str, new: str) -> int:
+    moved = 0
+    now = utcnow()
+    for item in db.scalars(select(KnowledgeItem)).all():
+        if within(item.folder or "", old):
+            item.folder = move_path(item.folder or "", old, new)
+            item.updated_at = now
+            moved += 1
+    existing = set(_explicit(db))
+    for f in db.scalars(select(KnowledgeFolder)).all():
+        if within(f.path, old):
+            target = move_path(f.path, old, new)
+            db.delete(f)
+            if target and target not in existing:
+                db.add(KnowledgeFolder(path=target))
+                existing.add(target)
+    db.flush()
+    return moved
 
 
 @router.get("/knowledge/{item_id}", response_model=KnowledgeDetailOut, responses={404: {"model": ErrorOut}})
@@ -160,9 +284,24 @@ def update_knowledge(item_id: str, body: KnowledgePatch, request: Request, backg
         raise ApiError(409, "builtin_protected", "Встроенный материал можно только перенести в другую папку")
     changed: dict[str, str] = {}
     reindex = False
+    relinked: list[KnowledgeItem] = []
     if body.title is not None and body.title.strip() and body.title.strip() != item.title:
-        item.title = body.title.strip()[:500]
+        old_title, new_title = item.title, body.title.strip()[:500]
+        if body.update_links:
+            # заметки, чьи [[ссылки]] сейчас ведут сюда, — до смены названия
+            others = db.scalars(select(KnowledgeItem).where(KnowledgeItem.source != "builtin")).all()
+            links = resolve_links([_note(i) for i in [*others, item]])
+            me = str(item.id)
+            for other in others:
+                if other.id != item.id and any(t == me for _, t in links.get(str(other.id), [])):
+                    text = rename_links(other.content or "", old_title, new_title)
+                    if text != other.content:
+                        other.content, other.status, other.updated_at = text, "indexing", utcnow()
+                        relinked.append(other)
+        item.title = new_title
         changed["title"] = item.title
+        if relinked:
+            changed["relinked"] = str(len(relinked))
         reindex = True
     if body.folder is not None and normalize_folder(body.folder) != (item.folder or ""):
         item.folder = normalize_folder(body.folder)
@@ -181,6 +320,8 @@ def update_knowledge(item_id: str, body: KnowledgePatch, request: Request, backg
         db.commit()
         if reindex:
             background.add_task(index_item, svc, item.id)
+        for other in relinked:
+            background.add_task(index_item, svc, other.id)
     return item_out(item)
 
 
