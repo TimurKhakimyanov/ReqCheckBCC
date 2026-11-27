@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import uuid
 from datetime import datetime, timezone
@@ -226,6 +227,19 @@ async def test_knowledge(client, services):
     assert items[r.json()["id"]]["source"] == "upload"
     assert (await client.delete(f"/api/knowledge/{manual_id}")).status_code == 204
     assert (await client.post("/api/knowledge", json={"title": "x"})).status_code == 422
+
+
+def test_reindex_into_empty_qdrant():
+    """Пустой Qdrant (или смена модели эмбеддингов) → api при старте переиндексирует базу знаний и отчёты."""
+    from app.knowledge import sync_vectors
+    from app.vectors import KNOWLEDGE, REQUIREMENTS
+
+    fresh = testing.RecordingServices(os.environ["REDIS_URL"])
+    assert sync_vectors(fresh)
+    hits = fresh.vectors.search(REQUIREMENTS, SAMPLE["findings"][0]["title"], limit=1, filters={"kind": "finding"})
+    assert hits and hits[0].payload["run_id"] == state["run"]["id"]
+    titles = {p.payload["title"] for p in fresh.vectors.search(KNOWLEDGE, "шаблон раздел", limit=50)}
+    assert "tpl" in titles and any("Критерии" in t for t in titles)
 
 
 async def test_cancel_and_delete(client, services):

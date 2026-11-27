@@ -11,14 +11,15 @@ import uuid
 from pathlib import Path
 
 import req_core
-from req_contracts import CRITERIA
+from req_contracts import CRITERIA, Report
 from sqlalchemy import select
 
 from .db import SessionLocal
 from .embeddings import EmbedderError
-from .models import KnowledgeItem
+from .indexing import index_report
+from .models import Document, KnowledgeItem, ReportRow, Run
 from .services import Services
-from .vectors import KNOWLEDGE, point_id
+from .vectors import KNOWLEDGE, REQUIREMENTS, point_id
 
 log = logging.getLogger(__name__)
 BUILTIN_TITLE = "Критерии качества требований (ISO/IEC/IEEE 29148, IEEE 830) — пересказ"
@@ -113,13 +114,41 @@ def ensure_builtin(svc: Services) -> bool:
         return db.get(KnowledgeItem, item_id).status == "ready"
 
 
+def sync_vectors(svc: Services) -> bool:
+    """Старт api: если коллекции Qdrant созданы заново (пустой Qdrant или смена модели эмбеддингов) —
+    переиндексировать базу знаний и отчёты прошлых прогонов; затем убедиться во встроенном элементе."""
+    svc.vectors.ensure_collection(KNOWLEDGE)
+    svc.vectors.ensure_collection(REQUIREMENTS)
+    with SessionLocal() as db:
+        if KNOWLEDGE in svc.vectors.created:
+            items = db.scalars(select(KnowledgeItem).where(KnowledgeItem.source != "builtin")).all()
+            for item in items:
+                item.status = "indexing"
+            builtin = db.scalar(select(KnowledgeItem).where(KnowledgeItem.source == "builtin"))
+            if builtin is not None:
+                builtin.status = "indexing"
+            db.commit()
+            for item in items:
+                index_item(svc, item.id)
+            log.info("knowledge reindexed", extra={"items": len(items)})
+            svc.vectors.created.discard(KNOWLEDGE)
+        if REQUIREMENTS in svc.vectors.created:
+            rows = db.execute(select(ReportRow.run_id, ReportRow.data, Document.id, Document.name)
+                              .join(Run, Run.id == ReportRow.run_id).join(Document, Document.id == Run.document_id)).all()
+            for run_id, data, doc_id, doc_name in rows:
+                index_report(svc.vectors, str(run_id), str(doc_id), doc_name, Report.model_validate(data))
+            log.info("past runs reindexed", extra={"runs": len(rows)})
+            svc.vectors.created.discard(REQUIREMENTS)
+    return ensure_builtin(svc)
+
+
 def start_builtin_indexer(svc: Services, attempts: int = 60, delay_s: float = 10.0) -> threading.Thread:
     """Фоновая индексация при старте: embedder может грузить модель дольше, чем стартует api."""
 
     def _loop() -> None:
         for attempt in range(attempts):
             try:
-                if ensure_builtin(svc):
+                if sync_vectors(svc):
                     log.info("builtin knowledge ready")
                     return
             except Exception as e:  # noqa: BLE001

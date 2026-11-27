@@ -28,6 +28,8 @@ class VectorStore:
         self.client = client
         self.embedder = embedder
         self._ready: set[str] = set()
+        # коллекции, созданные (или пересозданные из-за смены размерности) этим процессом — нужна переиндексация
+        self.created: set[str] = set()
         self._lock = threading.Lock()
 
     def ensure_collection(self, name: str) -> None:
@@ -37,6 +39,7 @@ class VectorStore:
             dim = int(self.embedder.info()["dim"])
             if not self.client.collection_exists(name):
                 self.client.create_collection(name, vectors_config=qm.VectorParams(size=dim, distance=qm.Distance.COSINE))
+                self.created.add(name)
                 log.info("created qdrant collection", extra={"collection": name, "dim": dim})
             else:
                 info = self.client.get_collection(name)
@@ -48,6 +51,7 @@ class VectorStore:
                     self.client.delete_collection(name)
                     self.client.create_collection(
                         name, vectors_config=qm.VectorParams(size=dim, distance=qm.Distance.COSINE))
+                    self.created.add(name)
             self._ready.add(name)
 
     def upsert(self, collection: str, items: list[tuple[str, str, dict[str, Any]]]) -> int:

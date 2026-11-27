@@ -44,6 +44,8 @@ def bootstrap() -> None:
 async def lifespan(app: FastAPI):
     s = get_settings()
     setup_logging("api", s.log_level)
+    if len(s.app_secret_key) < 32 or s.app_secret_key == "change-me":
+        log.warning("APP_SECRET_KEY is short or default; generate one: python -m app.keygen")
     try:
         bootstrap()
     except SQLAlchemyError:
